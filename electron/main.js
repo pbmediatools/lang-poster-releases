@@ -136,6 +136,14 @@ function startServer(apiKey) {
   );
   const serverScript = path.join(standaloneDir, "server.js");
 
+  // Write server logs to a file so we can diagnose crashes on any platform
+  const logPath = path.join(app.getPath("userData"), "server.log");
+  const logStream = fs.createWriteStream(logPath, { flags: "a" });
+  logStream.write(`\n--- Server start ${new Date().toISOString()} ---\n`);
+  logStream.write(`standaloneDir: ${standaloneDir}\n`);
+  logStream.write(`serverScript: ${serverScript}\n`);
+  logStream.write(`exists: ${fs.existsSync(serverScript)}\n`);
+
   serverProcess = spawn(process.execPath, [serverScript], {
     cwd: standaloneDir,
     env: {
@@ -146,14 +154,18 @@ function startServer(apiKey) {
       ANTHROPIC_API_KEY: apiKey,
       NODE_ENV: "production",
     },
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
+  serverProcess.stdout.pipe(logStream);
+  serverProcess.stderr.pipe(logStream);
+
   serverProcess.on("exit", (code, signal) => {
+    logStream.write(`Server exited code=${code} signal=${signal}\n`);
     if (mainWindow && !mainWindow.isDestroyed()) {
       dialog.showErrorBox(
         "Server stopped",
-        `Next.js server exited (code=${code}, signal=${signal}).`,
+        `Next.js server exited (code=${code}, signal=${signal}).\n\nLog file: ${logPath}`,
       );
     }
     serverProcess = null;
