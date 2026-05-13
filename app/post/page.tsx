@@ -139,6 +139,7 @@ export default function PostPage() {
       return;
     }
     setError(null);
+    setRenderedPages([]);
     setBusy("rendering");
     try {
       const r = await fetch("/api/post/render", {
@@ -149,9 +150,47 @@ export default function PostPage() {
           interiors: interiorPages,
         }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || "render failed");
-      setRenderedPages(data.pages);
+
+      if (!r.ok || !r.body) {
+        // Non-streaming error response
+        const text = await r.text();
+        let msg = "render failed";
+        try { msg = JSON.parse(text).error || msg; } catch { /* ignore */ }
+        throw new Error(msg);
+      }
+
+      // Read the NDJSON stream — pages arrive one at a time so the preview
+      // updates progressively and we never buffer a huge single JSON blob.
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const pages: string[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";          // keep incomplete last line
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const obj = JSON.parse(line) as { page?: string; error?: string };
+          if (obj.error) throw new Error(obj.error);
+          if (obj.page) {
+            pages.push(obj.page);
+            setRenderedPages([...pages]);    // show each page as it arrives
+          }
+        }
+      }
+      // Flush any remaining content in the buffer
+      if (buffer.trim()) {
+        const obj = JSON.parse(buffer) as { page?: string; error?: string };
+        if (obj.error) throw new Error(obj.error);
+        if (obj.page) {
+          pages.push(obj.page);
+          setRenderedPages([...pages]);
+        }
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -465,7 +504,9 @@ export default function PostPage() {
               className="mt-5 w-full rounded bg-slate-900 px-4 py-3 font-medium text-white disabled:opacity-40"
             >
               {busy === "rendering"
-                ? "Rendering…"
+                ? renderedPages.length > 0
+                  ? `Rendering… (${renderedPages.length}/${totalPages})`
+                  : "Rendering…"
                 : `Render ${totalPages} ${totalPages === 1 ? "page" : "pages"}`}
             </button>
             {renderedPages.length > 0 && (
