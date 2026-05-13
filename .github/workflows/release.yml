@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ── Mac build (arm64 + x64 DMG) ───────────────────────────────────────────
-  release-mac:
-    runs-on: macos-14
+  # ── Mac arm64 (Apple Silicon) ──────────────────────────────────────────────
+  release-mac-arm64:
+    runs-on: macos-14        # Apple Silicon — installs arm64 Sharp natively
     steps:
       - uses: actions/checkout@v4
 
@@ -26,8 +26,30 @@ jobs:
       - name: Build Next.js + prepare standalone
         run: npm run build:electron
 
-      - name: Package & publish Mac DMG
-        run: npx electron-builder --mac --publish always
+      - name: Package & publish arm64 DMG
+        run: npx electron-builder --mac --arm64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  # ── Mac x64 (Intel) ────────────────────────────────────────────────────────
+  release-mac-x64:
+    runs-on: macos-13        # Intel — installs x64 Sharp natively
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js + prepare standalone
+        run: npm run build:electron
+
+      - name: Package & publish x64 DMG
+        run: npx electron-builder --mac --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
