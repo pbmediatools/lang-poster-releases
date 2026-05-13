@@ -214,6 +214,7 @@ export default function PostPage() {
             cover, the rest fill the inside pages.
           </p>
         </div>
+        <span className="text-xs text-slate-400">v1.0.2</span>
         <a
           href="/"
           className="text-sm text-slate-500 underline hover:text-slate-900"
