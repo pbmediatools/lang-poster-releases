@@ -50,7 +50,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "GITHUB_USERNAME",
+      "owner": "pbmediatools",
       "repo": "lang-poster-releases",
       "private": true
     },
