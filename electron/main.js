@@ -153,6 +153,7 @@ function startServer(apiKey) {
       HOSTNAME: "127.0.0.1",
       ANTHROPIC_API_KEY: apiKey,
       NODE_ENV: "production",
+      USERDATA_PATH: app.getPath("userData"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

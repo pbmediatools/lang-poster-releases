@@ -1,7 +1,7 @@
 "use client";
 
 import JSZip from "jszip";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import type { Property } from "@/lib/types";
 
 const OFFICES = [
@@ -40,6 +40,38 @@ export default function PostPage() {
   const [copied, setCopied] = useState(false);
   // Thumbnail size in pixels (min column width). Drag the slider to resize.
   const [thumbSize, setThumbSize] = useState(180);
+  // Settings modal
+  const [showSettings, setShowSettings] = useState(false);
+  const [maskedKey, setMaskedKey] = useState("");
+  const [newKey, setNewKey] = useState("");
+  const [keyStatus, setKeyStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((d) => setMaskedKey(d.maskedKey || ""))
+      .catch(() => {});
+  }, []);
+
+  async function saveApiKey() {
+    setKeyStatus("saving");
+    try {
+      const r = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: newKey }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setMaskedKey(`${newKey.slice(0, 12)}${"•".repeat(20)}`);
+      setNewKey("");
+      setKeyStatus("saved");
+      setTimeout(() => setKeyStatus("idle"), 2000);
+    } catch (e) {
+      setKeyStatus("error");
+      setTimeout(() => setKeyStatus("idle"), 3000);
+    }
+  }
 
   const allImages = property?.imageUrls ?? [];
 
@@ -208,20 +240,67 @@ export default function PostPage() {
     <main className="mx-auto max-w-7xl p-6">
       <header className="mb-6 flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Property Post</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Lang Property Poster</h1>
           <p className="mt-1 text-slate-600">
             Paste a Lang property URL → first photo you click becomes the
             cover, the rest fill the inside pages.
           </p>
         </div>
-        <span className="text-xs text-slate-400">v{process.env.NEXT_PUBLIC_APP_VERSION}</span>
-        <a
-          href="/"
-          className="text-sm text-slate-500 underline hover:text-slate-900"
-        >
-          ← Sendible flow
-        </a>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-400">v{process.env.NEXT_PUBLIC_APP_VERSION}</span>
+          <button
+            onClick={() => setShowSettings(true)}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            ⚙ Settings
+          </button>
+        </div>
       </header>
+
+      {/* Settings modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-lg font-semibold">Settings</h2>
+            <div className="mb-4">
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Anthropic API Key
+              </label>
+              {maskedKey && (
+                <p className="mb-2 font-mono text-sm text-slate-500">{maskedKey}</p>
+              )}
+              <input
+                type="password"
+                placeholder="sk-ant-..."
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                className="w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+              />
+            </div>
+            {keyStatus === "error" && (
+              <p className="mb-3 text-sm text-red-600">Invalid key — must start with sk-ant-</p>
+            )}
+            {keyStatus === "saved" && (
+              <p className="mb-3 text-sm text-green-600">✓ Key saved successfully</p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={saveApiKey}
+                disabled={!newKey || keyStatus === "saving"}
+                className="flex-1 rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+              >
+                {keyStatus === "saving" ? "Saving…" : "Save key"}
+              </button>
+              <button
+                onClick={() => { setShowSettings(false); setNewKey(""); setKeyStatus("idle"); }}
+                className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleGenerate} className="mb-6 flex gap-2">
         <input
