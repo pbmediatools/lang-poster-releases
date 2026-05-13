@@ -1,6 +1,6 @@
 {
   "name": "lang-property-poster",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -51,7 +51,8 @@
     "publish": {
       "provider": "github",
       "owner": "pbmediatools",
-      "repo": "lang-poster-releases"
+      "repo": "lang-poster-releases",
+      "releaseType": "release"
     },
     "files": [
       "electron/**/*",
