@@ -341,7 +341,7 @@ export default function PostPage() {
               </Field>
               <Field label="EPC rating (used in caption)">
                 <input
-                  maxLength={2}
+                  maxLength={4}
                   placeholder="e.g. B"
                   className="w-full rounded border border-slate-300 px-2 py-1 uppercase"
                   value={cover.epcRating}
