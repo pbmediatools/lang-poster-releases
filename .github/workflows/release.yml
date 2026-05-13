@@ -9,9 +9,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ── Mac arm64 (Apple Silicon) ──────────────────────────────────────────────
-  release-mac-arm64:
-    runs-on: macos-14        # Apple Silicon — installs arm64 Sharp natively
+  # ── Mac build (arm64 + x64 DMG from a single ARM runner) ──────────────────
+  #
+  # Both DMGs are built on macos-14 (Apple Silicon). After `npm ci` the ARM
+  # Sharp binary is already present. We then cross-install the x64 Sharp
+  # binary and copy it into the standalone output before packaging, so each
+  # DMG contains the Sharp binary its architecture actually needs.
+  release-mac:
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -20,36 +25,31 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
+      - name: Install dependencies (ARM-native)
         run: npm ci
+
+      - name: Cross-install x64 Sharp for Intel DMG
+        run: npm install --os=darwin --cpu=x64 sharp
 
       - name: Build Next.js + prepare standalone
         run: npm run build:electron
 
-      - name: Package & publish arm64 DMG
-        run: npx electron-builder --mac --arm64 --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      - name: Inject x64 Sharp binary into standalone output
+        # Next.js file-tracing only captures the arm64 binary (native platform).
+        # Copy the x64 packages in so the Intel app can load them at runtime.
+        run: |
+          for pkg in sharp-darwin-x64 sharp-libvips-darwin-x64; do
+            if [ -d "node_modules/@img/$pkg" ]; then
+              mkdir -p ".next/standalone/node_modules/@img"
+              cp -r "node_modules/@img/$pkg" ".next/standalone/node_modules/@img/"
+              echo "Copied @img/$pkg into standalone"
+            fi
+          done
 
-  # ── Mac x64 (Intel) ────────────────────────────────────────────────────────
-  release-mac-x64:
-    runs-on: macos-13        # Intel — installs x64 Sharp natively
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Next.js + prepare standalone
-        run: npm run build:electron
-
-      - name: Package & publish x64 DMG
-        run: npx electron-builder --mac --x64 --publish always
+      - name: Package & publish arm64 + x64 DMGs
+        # No --arm64 / --x64 flag → builds all arches from package.json (both).
+        # Produces a single unified latest-mac.yml covering both architectures.
+        run: npx electron-builder --mac --publish always
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
