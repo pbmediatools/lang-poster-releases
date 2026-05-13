@@ -45,6 +45,10 @@ export default function PostPage() {
   const [maskedKey, setMaskedKey] = useState("");
   const [newKey, setNewKey] = useState("");
   const [keyStatus, setKeyStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
+  const [updateStatus, setUpdateStatus] = useState<
+    "idle"|"checking"|"uptodate"|"available"|"downloaded"|"error"
+  >("idle");
+  const [updateInfo, setUpdateInfo] = useState<{ version?: string; message?: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -72,6 +76,29 @@ export default function PostPage() {
       setTimeout(() => setKeyStatus("idle"), 3000);
     }
   }
+
+  async function checkForUpdates() {
+    setUpdateStatus("checking");
+    setUpdateInfo(null);
+    try {
+      // window.electronAPI is injected by the Electron preload; absent in a browser.
+      const api = (window as unknown as { electronAPI?: { checkForUpdates: () => Promise<{ status: string; version?: string; message?: string }> } }).electronAPI;
+      if (!api) {
+        setUpdateStatus("idle");
+        return;
+      }
+      const result = await api.checkForUpdates();
+      setUpdateStatus(result.status as typeof updateStatus);
+      setUpdateInfo({ version: result.version, message: result.message });
+    } catch {
+      setUpdateStatus("error");
+      setUpdateInfo({ message: "Could not check for updates" });
+    }
+  }
+
+  // Detect if running inside Electron (preload injects window.electronAPI)
+  const isElectron = typeof window !== "undefined" &&
+    !!(window as unknown as { electronAPI?: unknown }).electronAPI;
 
   const allImages = property?.imageUrls ?? [];
 
@@ -330,8 +357,45 @@ export default function PostPage() {
               >
                 {keyStatus === "saving" ? "Saving…" : "Save key"}
               </button>
+            </div>
+
+            {/* Updates section — only shown inside the Electron app */}
+            {isElectron && (
+              <div className="mt-5 border-t border-slate-200 pt-5">
+                <div className="mb-2 text-sm font-medium text-slate-700">Updates</div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={checkForUpdates}
+                    disabled={updateStatus === "checking"}
+                    className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {updateStatus === "checking" ? "Checking…" : "Check for updates"}
+                  </button>
+                  {updateStatus === "uptodate" && (
+                    <span className="text-sm text-green-700">✓ You&apos;re on the latest version</span>
+                  )}
+                  {updateStatus === "available" && (
+                    <span className="text-sm text-blue-700">
+                      v{updateInfo?.version} found — downloading in background
+                    </span>
+                  )}
+                  {updateStatus === "downloaded" && (
+                    <span className="text-sm text-green-700">
+                      ✓ v{updateInfo?.version} ready — will install on next relaunch
+                    </span>
+                  )}
+                  {updateStatus === "error" && (
+                    <span className="text-sm text-red-600">
+                      {updateInfo?.message || "Could not check for updates"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end">
               <button
-                onClick={() => { setShowSettings(false); setNewKey(""); setKeyStatus("idle"); }}
+                onClick={() => { setShowSettings(false); setNewKey(""); setKeyStatus("idle"); setUpdateStatus("idle"); }}
                 className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600"
               >
                 Close

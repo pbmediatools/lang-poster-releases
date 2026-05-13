@@ -187,7 +187,10 @@ async function createWindow(apiKey) {
     width: 1280,
     height: 900,
     title: "Lang Property Poster",
-    webPreferences: { contextIsolation: true },
+    webPreferences: {
+      contextIsolation: true,
+      preload: path.join(__dirname, "app-preload.js"),
+    },
   });
 
   // Open external links in the user's browser, not inside the app
@@ -211,6 +214,41 @@ async function createWindow(apiKey) {
 
   if (isDev) mainWindow.webContents.openDevTools({ mode: "detach" });
 }
+
+// --- IPC handlers ---------------------------------------------------------
+
+// Check for updates on demand from the Settings modal.
+// Returns { status, version?, message? } — never throws.
+ipcMain.handle("check-for-updates", () => {
+  if (!autoUpdater) {
+    // Running in dev mode or electron-updater unavailable
+    return Promise.resolve({ status: "unavailable" });
+  }
+
+  return new Promise((resolve) => {
+    function cleanup() {
+      autoUpdater.removeListener("update-available", onAvailable);
+      autoUpdater.removeListener("update-not-available", onNotAvailable);
+      autoUpdater.removeListener("update-downloaded", onDownloaded);
+      autoUpdater.removeListener("error", onErr);
+    }
+
+    const onAvailable = (info) => { cleanup(); resolve({ status: "available", version: info.version }); };
+    const onNotAvailable = ()   => { cleanup(); resolve({ status: "uptodate" }); };
+    const onDownloaded  = (info)=> { cleanup(); resolve({ status: "downloaded", version: info.version }); };
+    const onErr = (err)         => { cleanup(); resolve({ status: "error", message: String(err.message || err) }); };
+
+    autoUpdater.once("update-available",     onAvailable);
+    autoUpdater.once("update-not-available", onNotAvailable);
+    autoUpdater.once("update-downloaded",    onDownloaded);
+    autoUpdater.once("error",               onErr);
+
+    autoUpdater.checkForUpdates().catch((err) => {
+      cleanup();
+      resolve({ status: "error", message: String(err.message || err) });
+    });
+  });
+});
 
 // --- App lifecycle --------------------------------------------------------
 
