@@ -1,6 +1,6 @@
 {
   "name": "lang-property-poster",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -72,20 +72,28 @@
       "target": [
         {
           "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
+          "arch": ["arm64", "x64"]
+        },
+        {
+          "target": "pkg",
+          "arch": ["arm64", "x64"]
         }
       ]
+    },
+    "pkg": {
+      "allowAnywhere": true,
+      "allowCurrentUserHome": true,
+      "isRelocatable": true
     },
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
+        },
+        {
+          "target": "msi",
+          "arch": ["x64"]
         }
       ]
     },
@@ -93,6 +101,10 @@
       "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false
+    },
+    "msi": {
+      "oneClick": true,
+      "perMachine": false
     }
   }
 }
