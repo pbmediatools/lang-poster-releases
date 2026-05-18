@@ -1,7 +1,5 @@
 name: Release
 
-# Runs automatically when you push a version tag (e.g. v1.0.1)
-# Also runnable manually from GitHub → Actions → Release → Run workflow
 on:
   push:
     tags:
@@ -9,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ── Mac build (arm64 + x64 DMG & PKG from a single ARM runner) ────────────
+  # ── Mac build (arm64 + x64 DMG) ───────────────────────────────────────────
   release-mac:
     runs-on: macos-14
     steps:
@@ -23,7 +21,7 @@ jobs:
       - name: Install dependencies (ARM-native)
         run: npm ci
 
-      - name: Cross-install x64 Sharp for Intel builds
+      - name: Cross-install x64 Sharp for Intel DMG
         run: npm install --os=darwin --cpu=x64 sharp
 
       - name: Build Next.js + prepare standalone
@@ -39,30 +37,8 @@ jobs:
             fi
           done
 
-      # Step 1 — build both DMGs together in one call.
-      # This produces a single unified latest-mac.yml (needed for auto-updates).
-      # DMG target has no race condition with multiple architectures.
       - name: Package & publish DMGs (arm64 + x64)
-        run: npx electron-builder --mac dmg --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
-      # Step 2 — build PKGs one architecture at a time to avoid the race
-      # condition in electron-builder where concurrent arch builds try to
-      # delete the same intermediate file (com.langtownandcountry.poster.pkg).
-      - name: Build arm64 PKG
-        run: npx electron-builder --mac pkg --arm64 --publish never
-
-      - name: Build x64 PKG
-        run: npx electron-builder --mac pkg --x64 --publish never
-
-      # Step 3 — upload the PKGs manually to the release that Step 1 created.
-      - name: Upload PKG files to GitHub release
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          for f in dist-electron/*.pkg; do
-            gh release upload "v$VERSION" "$f" --clobber
-          done
+        run: npx electron-builder --mac --publish always
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 

@@ -10,14 +10,19 @@ const path = require("path");
 const fs = require("fs");
 const http = require("http");
 
-// Auto-updater — only active in packaged builds
+// Auto-updater — only active in packaged builds that have app-update.yml.
+// PKG installs built with --publish never omit that file, so we guard
+// against it here rather than crashing on startup.
 let autoUpdater = null;
 if (app.isPackaged) {
   try {
-    autoUpdater = require("electron-updater").autoUpdater;
-    autoUpdater.autoDownload = true;       // download silently in background
-    autoUpdater.autoInstallOnAppQuit = true; // install when user next quits
-    autoUpdater.logger = null;             // suppress noisy logs
+    const updateConfigPath = path.join(process.resourcesPath, "app-update.yml");
+    if (fs.existsSync(updateConfigPath)) {
+      autoUpdater = require("electron-updater").autoUpdater;
+      autoUpdater.autoDownload = true;        // download silently in background
+      autoUpdater.autoInstallOnAppQuit = true; // install when user next quits
+      autoUpdater.logger = null;              // suppress noisy logs
+    }
   } catch {
     // electron-updater not available — updates disabled
     autoUpdater = null;

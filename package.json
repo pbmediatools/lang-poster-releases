@@ -1,6 +1,6 @@
 {
   "name": "lang-property-poster",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -73,17 +73,8 @@
         {
           "target": "dmg",
           "arch": ["arm64", "x64"]
-        },
-        {
-          "target": "pkg",
-          "arch": ["arm64", "x64"]
         }
       ]
-    },
-    "pkg": {
-      "allowAnywhere": true,
-      "allowCurrentUserHome": true,
-      "isRelocatable": true
     },
     "win": {
       "target": [
