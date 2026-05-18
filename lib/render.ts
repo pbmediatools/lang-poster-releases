@@ -110,20 +110,22 @@ async function buildCoverSvg(data: CoverData): Promise<string> {
     anchor: "middle",
   });
 
-  // Both icon PNGs are full-size (1080×1350) overlays — only the counts are
-  // text, positioned to sit to the right of where each icon PNG lands.
-  const iconsY = 870;
-  const iconNum = (n: number) =>
-    svgText(`x${n}`, 110, 51, 56, { weight: "light", anchor: "start" });
+  // Count labels sit to the right of each icon PNG's visual content.
+  // Positions derived from the measured bounding boxes of the icon PNGs:
+  //   Bed  icon visual: x 269–391, y 777–871, centre y 824
+  //   Bath icon visual: x 594–717, y 767–881, centre y 824
+  // svgText y is the text baseline; for 56 px Poppins the baseline sits
+  // ~20 px below the visual centre of the glyphs, so countY = 824 + 20 = 844.
+  const countY = 844;
 
   const bedCount =
     data.bedrooms !== null && data.bedrooms !== undefined
-      ? `<g transform="translate(${PAGE_W / 2 - 200} ${iconsY})">${iconNum(data.bedrooms)}</g>`
+      ? svgText(`x${data.bedrooms}`, 403, countY, 56, { weight: "light", anchor: "start" })
       : "";
 
   const bathCount =
     data.bathrooms !== null && data.bathrooms !== undefined
-      ? `<g transform="translate(${PAGE_W / 2 + 30} ${iconsY})">${iconNum(data.bathrooms)}</g>`
+      ? svgText(`x${data.bathrooms}`, 729, countY, 56, { weight: "light", anchor: "start" })
       : "";
 
   const office = svgText(data.office, PAGE_W / 2, 1180, 40, {
