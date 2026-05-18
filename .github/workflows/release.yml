@@ -9,12 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ── Mac build (arm64 + x64 DMG from a single ARM runner) ──────────────────
-  #
-  # Both DMGs are built on macos-14 (Apple Silicon). After `npm ci` the ARM
-  # Sharp binary is already present. We then cross-install the x64 Sharp
-  # binary and copy it into the standalone output before packaging, so each
-  # DMG contains the Sharp binary its architecture actually needs.
+  # ── Mac build (arm64 + x64 DMG & PKG from a single ARM runner) ────────────
   release-mac:
     runs-on: macos-14
     steps:
@@ -28,15 +23,13 @@ jobs:
       - name: Install dependencies (ARM-native)
         run: npm ci
 
-      - name: Cross-install x64 Sharp for Intel DMG
+      - name: Cross-install x64 Sharp for Intel builds
         run: npm install --os=darwin --cpu=x64 sharp
 
       - name: Build Next.js + prepare standalone
         run: npm run build:electron
 
       - name: Inject x64 Sharp binary into standalone output
-        # Next.js file-tracing only captures the arm64 binary (native platform).
-        # Copy the x64 packages in so the Intel app can load them at runtime.
         run: |
           for pkg in sharp-darwin-x64 sharp-libvips-darwin-x64; do
             if [ -d "node_modules/@img/$pkg" ]; then
@@ -46,14 +39,34 @@ jobs:
             fi
           done
 
-      - name: Package & publish arm64 + x64 DMGs
-        # No --arm64 / --x64 flag → builds all arches from package.json (both).
-        # Produces a single unified latest-mac.yml covering both architectures.
-        run: npx electron-builder --mac --publish always
+      # Step 1 — build both DMGs together in one call.
+      # This produces a single unified latest-mac.yml (needed for auto-updates).
+      # DMG target has no race condition with multiple architectures.
+      - name: Package & publish DMGs (arm64 + x64)
+        run: npx electron-builder --mac dmg --publish always
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-  # ── Windows build (x64 NSIS installer) ────────────────────────────────────
+      # Step 2 — build PKGs one architecture at a time to avoid the race
+      # condition in electron-builder where concurrent arch builds try to
+      # delete the same intermediate file (com.langtownandcountry.poster.pkg).
+      - name: Build arm64 PKG
+        run: npx electron-builder --mac pkg --arm64 --publish never
+
+      - name: Build x64 PKG
+        run: npx electron-builder --mac pkg --x64 --publish never
+
+      # Step 3 — upload the PKGs manually to the release that Step 1 created.
+      - name: Upload PKG files to GitHub release
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          for f in dist-electron/*.pkg; do
+            gh release upload "v$VERSION" "$f" --clobber
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  # ── Windows build (x64 NSIS exe + MSI) ────────────────────────────────────
   release-win:
     runs-on: windows-latest
     steps:
@@ -70,7 +83,7 @@ jobs:
       - name: Build Next.js + prepare standalone
         run: npm run build:electron
 
-      - name: Package & publish Windows installer
+      - name: Package & publish Windows installers
         run: npx electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
