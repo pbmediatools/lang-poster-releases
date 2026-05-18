@@ -10,21 +10,30 @@ export const OFFICES = {
   plymstock: { label: "Plymstock Office", phone: "01752 456000" },
 } as const;
 
-// Best-effort office routing from address + postcode. The property page
-// itself doesn't expose the assigned branch, and "Book a Viewing" always
-// links to the central Plymouth form, so this is heuristic. User can
-// override in the UI.
+// Best-effort office routing. Detection order (most → least reliable):
+//  1. Phone number visible on the page — definitive if present
+//  2. Postcode area
+//  3. Address / area keywords
+// User can always override in the UI.
 function suggestOffice(opts: {
   postcode: string;
   address: string;
+  bodyText?: string;
 }): { label: string; phone: string } {
-  const pc = opts.postcode.toUpperCase().replace(/\s+/g, "");
-  const addr = opts.address.toLowerCase();
+  // 1. Look for a branch-specific phone number in the page body
+  if (opts.bodyText) {
+    const digits = opts.bodyText.replace(/[\s\-().]/g, "");
+    if (digits.includes("01752456000")) return OFFICES.plymstock;
+    if (digits.includes("01752200909")) return OFFICES.waterside;
+    if (digits.includes("01752256000")) return OFFICES.plymouth;
+  }
 
-  // Plymstock — its own branch, postcode area PL9
+  // 2. Postcode — PL9 is squarely Plymstock territory
+  const pc = opts.postcode.toUpperCase().replace(/\s+/g, "");
   if (/^PL9/.test(pc)) return OFFICES.plymstock;
 
-  // Waterside team — handles waterfront / city-centre coastal stock
+  // 3. Address / area keywords for the Waterside team
+  const addr = opts.address.toLowerCase();
   const watersideKeywords = [
     "hoe",
     "barbican",
@@ -168,6 +177,6 @@ export async function scrapeProperty(url: string): Promise<Property> {
     imageUrls: Array.from(imageUrls).slice(0, 100),
     phone: PHONE,
     epcRating,
-    suggestedOffice: suggestOffice({ postcode, address }),
+    suggestedOffice: suggestOffice({ postcode, address, bodyText }),
   };
 }

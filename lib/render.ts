@@ -103,10 +103,10 @@ async function buildCoverSvg(data: CoverData): Promise<string> {
     ? `<rect width="${PAGE_W}" height="${PAGE_H}" fill="black" opacity="0.35"/>`
     : "";
 
-  const address = svgText(data.shortAddress, PAGE_W / 2, 620, 46, {
+  const address = svgText(data.shortAddress, PAGE_W / 2, 570, 46, {
     anchor: "middle",
   });
-  const statusText = svgText(status, PAGE_W / 2, 770, 130, {
+  const statusText = svgText(status, PAGE_W / 2, 700, 130, {
     anchor: "middle",
   });
 
