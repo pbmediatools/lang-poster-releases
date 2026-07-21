@@ -11,38 +11,31 @@ export const OFFICES = {
 } as const;
 
 // Best-effort office routing. Detection order (most → least reliable):
-//  1. Phone number visible on the page — definitive if present
-//  2. Postcode area
-//  3. Address / area keywords
-// User can always override in the UI.
+//  1. Postcode area
+//  2. Address / area keywords
+// Phone numbers are NOT used — the site footer lists all three on every page,
+// which causes false matches. User can always override in the UI.
 function suggestOffice(opts: {
   postcode: string;
   address: string;
-  bodyText?: string;
 }): { label: string; phone: string } {
-  // 1. Look for a branch-specific phone number in the page body
-  if (opts.bodyText) {
-    const digits = opts.bodyText.replace(/[\s\-().]/g, "");
-    if (digits.includes("01752456000")) return OFFICES.plymstock;
-    if (digits.includes("01752200909")) return OFFICES.waterside;
-    if (digits.includes("01752256000")) return OFFICES.plymouth;
-  }
-
-  // 2. Postcode — PL9 is squarely Plymstock territory
   const pc = opts.postcode.toUpperCase().replace(/\s+/g, "");
+  const addr = opts.address.toLowerCase();
+
+  // 1. Postcode — PL9 is Plymstock / Elburton territory
   if (/^PL9/.test(pc)) return OFFICES.plymstock;
 
-  // 3. Address / area keywords for the Waterside team
-  const addr = opts.address.toLowerCase();
+  // 2. Plymstock-area address keywords
+  const plymstockKeywords = [
+    "plymstock", "elburton", "hooe", "oreston", "turnchapel",
+    "staddiscombe", "wembury", "brixton", "yealmpton", "holbeton",
+  ];
+  if (plymstockKeywords.some((k) => addr.includes(k))) return OFFICES.plymstock;
+
+  // 3. Waterside-area address keywords
   const watersideKeywords = [
-    "hoe",
-    "barbican",
-    "stonehouse",
-    "cattedown",
-    "waterside",
-    "millbay",
-    "royal william yard",
-    "sutton harbour",
+    "hoe", "barbican", "stonehouse", "cattedown",
+    "millbay", "royal william yard", "sutton harbour", "coxside",
   ];
   if (watersideKeywords.some((k) => addr.includes(k))) return OFFICES.waterside;
 
@@ -71,27 +64,6 @@ export async function scrapeProperty(url: string): Promise<Property> {
     addrParts.length > 1 ? `${addrParts[0]}, ${addrParts[1]}` : addrParts[0];
 
   const bodyText = $("body").text().replace(/\s+/g, " ");
-
-  // Fetch the "Book a Viewing" page — it reliably shows the branch phone number.
-  let bookingText = "";
-  const bookingHref = $("a")
-    .filter((_, el) => /book\s+a\s+viewing/i.test($(el).text()))
-    .first()
-    .attr("href");
-  if (bookingHref) {
-    try {
-      const bookingUrl = new URL(bookingHref, url).href;
-      const bookRes = await fetch(bookingUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; LangPosterBot/1.0)" },
-      });
-      if (bookRes.ok) {
-        const bookHtml = await bookRes.text();
-        bookingText = cheerio.load(bookHtml)("body").text().replace(/\s+/g, " ");
-      }
-    } catch {
-      // non-fatal — fall back to other detection methods
-    }
-  }
 
   const priceMatch = bodyText.match(
     /£\s?[\d,]+(?:\s?(?:PCM|pcm|Per Calendar Month|per month))?/i,
@@ -200,6 +172,6 @@ export async function scrapeProperty(url: string): Promise<Property> {
     imageUrls: Array.from(imageUrls).slice(0, 100),
     phone: PHONE,
     epcRating,
-    suggestedOffice: suggestOffice({ postcode, address, bodyText: bookingText || bodyText }),
+    suggestedOffice: suggestOffice({ postcode, address }),
   };
 }
