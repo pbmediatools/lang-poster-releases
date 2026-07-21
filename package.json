@@ -1,6 +1,6 @@
 {
   "name": "lang-property-poster",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "private": true,
   "main": "electron/main.js",
   "scripts": {

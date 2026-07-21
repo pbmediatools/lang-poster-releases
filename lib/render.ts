@@ -314,10 +314,11 @@ export async function renderReduced(data: ReducedData): Promise<Buffer> {
     Promise.resolve(loadAsset("wave.png")),
   ]);
 
-  // Wave goes first so text SVG renders on top of it
+  // Wave goes first so text SVG renders on top of it.
+  // Negative top shifts the wave pattern ~100px higher in the frame.
   return sharp(bgBuf)
     .composite([
-      { input: waveBuf, top: 0, left: 0 },
+      { input: waveBuf, top: -100, left: 0 },
       { input: svgBuf, top: 0, left: 0 },
       { input: logoBuf, top: REDUCED_LOGO_TOP, left: REDUCED_LOGO_LEFT },
     ])

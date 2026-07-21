@@ -90,7 +90,9 @@ function sanitizePath(d: string): string {
   return out.join(" ");
 }
 
-// Returns an SVG <path …/> element for the given text.
+// Returns one or more SVG <path> elements for the given text.
+// Renders each character individually so a bad glyph (NaN path data) only
+// affects that character rather than corrupting the entire string.
 export function svgText(
   text: string,
   x: number,
@@ -101,10 +103,19 @@ export function svgText(
   const { weight = "light", anchor = "start", fill = "white" } = opts;
   const font = weight === "regular" ? regularFont() : weight === "bold-italic" ? boldItalicFont() : lightFont();
   const renderOpts = { kerning: false } as const;
-  const advance = font.getAdvanceWidth(text, fontSize, renderOpts);
-  let dx = 0;
-  if (anchor === "middle") dx = -advance / 2;
-  else if (anchor === "end") dx = -advance;
-  const raw = font.getPath(text, x + dx, y, fontSize, renderOpts).toPathData(2);
-  return `<path d="${sanitizePath(raw)}" fill="${fill}"/>`;
+
+  // Compute starting x accounting for text anchor
+  const totalAdvance = font.getAdvanceWidth(text, fontSize, renderOpts);
+  let curX = x;
+  if (anchor === "middle") curX = x - totalAdvance / 2;
+  else if (anchor === "end") curX = x - totalAdvance;
+
+  const parts: string[] = [];
+  for (const char of text) {
+    const raw = font.getPath(char, curX, y, fontSize, renderOpts).toPathData(2);
+    const d = sanitizePath(raw);
+    if (d.trim()) parts.push(`<path d="${d}" fill="${fill}"/>`);
+    curX += font.getAdvanceWidth(char, fontSize, renderOpts);
+  }
+  return parts.join("");
 }
