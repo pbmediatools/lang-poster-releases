@@ -66,9 +66,32 @@ export async function scrapeProperty(url: string): Promise<Property> {
   const title =
     text("h1") || text("h2") || $("title").text().split("|")[0].trim();
   const address = title;
-  const shortAddress = address.split(",")[0].trim();
+  const addrParts = address.split(",").map((p) => p.trim()).filter(Boolean);
+  const shortAddress =
+    addrParts.length > 1 ? `${addrParts[0]}, ${addrParts[1]}` : addrParts[0];
 
   const bodyText = $("body").text().replace(/\s+/g, " ");
+
+  // Fetch the "Book a Viewing" page — it reliably shows the branch phone number.
+  let bookingText = "";
+  const bookingHref = $("a")
+    .filter((_, el) => /book\s+a\s+viewing/i.test($(el).text()))
+    .first()
+    .attr("href");
+  if (bookingHref) {
+    try {
+      const bookingUrl = new URL(bookingHref, url).href;
+      const bookRes = await fetch(bookingUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; LangPosterBot/1.0)" },
+      });
+      if (bookRes.ok) {
+        const bookHtml = await bookRes.text();
+        bookingText = cheerio.load(bookHtml)("body").text().replace(/\s+/g, " ");
+      }
+    } catch {
+      // non-fatal — fall back to other detection methods
+    }
+  }
 
   const priceMatch = bodyText.match(
     /£\s?[\d,]+(?:\s?(?:PCM|pcm|Per Calendar Month|per month))?/i,
@@ -177,6 +200,6 @@ export async function scrapeProperty(url: string): Promise<Property> {
     imageUrls: Array.from(imageUrls).slice(0, 100),
     phone: PHONE,
     epcRating,
-    suggestedOffice: suggestOffice({ postcode, address, bodyText }),
+    suggestedOffice: suggestOffice({ postcode, address, bodyText: bookingText || bodyText }),
   };
 }
