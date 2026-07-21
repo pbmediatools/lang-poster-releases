@@ -303,9 +303,9 @@ export async function renderReduced(data: ReducedData): Promise<Buffer> {
   const overlaySvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}">
   <rect x="0" y="${OVERLAY_TOP}" width="${PAGE_W}" height="${OVERLAY_BOT - OVERLAY_TOP}" fill="black" opacity="0.55"/>
-  ${svgText("JUST REDUCED", TEXT_LEFT, OVERLAY_TOP + 95, 72, { weight: "bold-italic", anchor: "start" })}
+  ${svgText("JUST REDUCED", TEXT_LEFT, OVERLAY_TOP + 95, 72, { weight: "bold", anchor: "start" })}
   ${svgText(data.shortAddress, TEXT_LEFT, OVERLAY_TOP + 175, 52, { weight: "light", anchor: "start" })}
-  ${svgText(data.price, TEXT_LEFT, OVERLAY_TOP + 265, 70, { weight: "bold-italic", anchor: "start" })}
+  ${svgText(data.price, TEXT_LEFT, OVERLAY_TOP + 265, 70, { weight: "bold", anchor: "start" })}
 </svg>`;
 
   const [svgBuf, logoBuf, waveBuf] = await Promise.all([
