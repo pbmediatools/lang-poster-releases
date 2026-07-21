@@ -12,7 +12,9 @@ const OFFICES = [
 
 const STATUS_OPTIONS = ["FOR SALE", "TO LET", "LET AGREED", "SOLD"];
 
-const MAX_TOTAL_IMAGES = 19; // 1 cover + 18 interior images (max 9 inside pages)
+const MAX_TOTAL_IMAGES = 19;
+
+type AppMode = "new-listing" | "sale-agreed" | "reduced";
 
 interface CoverEdit {
   shortAddress: string;
@@ -25,29 +27,48 @@ interface CoverEdit {
   epcRating: string;
 }
 
+interface SingleItem {
+  url: string;
+  property: Property;
+  selectedImageUrl: string;
+  shortAddress: string;
+  office: string;
+  phone: string;
+  website: string;
+  price: string;
+}
+
 export default function PostPage() {
+  const [mode, setMode] = useState<AppMode>("new-listing");
+
+  // ---- New Listing state ----
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<
-    "" | "scraping" | "rendering" | "captioning"
+    "" | "scraping" | "rendering" | "captioning" | "scraping-multi" | "rendering-multi"
   >("");
   const [error, setError] = useState<string | null>(null);
   const [property, setProperty] = useState<Property | null>(null);
   const [cover, setCover] = useState<CoverEdit | null>(null);
-  // First url = cover, urls 1..N = interior images, paired into pages
   const [picks, setPicks] = useState<string[]>([]);
   const [renderedPages, setRenderedPages] = useState<string[]>([]);
   const [captions, setCaptions] = useState<{ longForm: string; xCaption: string } | null>(null);
   const [captionTab, setCaptionTab] = useState<"social" | "x">("social");
   const [copied, setCopied] = useState(false);
-  // Thumbnail size in pixels (min column width). Drag the slider to resize.
   const [thumbSize, setThumbSize] = useState(180);
-  // Settings modal
+
+  // ---- Sale Agreed / Reduced state ----
+  const [singleRawUrls, setSingleRawUrls] = useState("");
+  const [singleItems, setSingleItems] = useState<SingleItem[]>([]);
+  const [singleRendered, setSingleRendered] = useState<string[]>([]);
+  const [singleScrapeProgress, setSingleScrapeProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // ---- Settings / updates ----
   const [showSettings, setShowSettings] = useState(false);
   const [maskedKey, setMaskedKey] = useState("");
   const [newKey, setNewKey] = useState("");
-  const [keyStatus, setKeyStatus] = useState<"idle"|"saving"|"saved"|"error">("idle");
+  const [keyStatus, setKeyStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [updateStatus, setUpdateStatus] = useState<
-    "idle"|"checking"|"uptodate"|"available"|"downloaded"|"error"
+    "idle" | "checking" | "uptodate" | "available" | "downloaded" | "error"
   >("idle");
   const [updateInfo, setUpdateInfo] = useState<{ version?: string; message?: string } | null>(null);
 
@@ -57,6 +78,11 @@ export default function PostPage() {
       .then((d) => setMaskedKey(d.maskedKey || ""))
       .catch(() => {});
   }, []);
+
+  function switchMode(m: AppMode) {
+    setMode(m);
+    setError(null);
+  }
 
   async function saveApiKey() {
     setKeyStatus("saving");
@@ -72,7 +98,7 @@ export default function PostPage() {
       setNewKey("");
       setKeyStatus("saved");
       setTimeout(() => setKeyStatus("idle"), 2000);
-    } catch (e) {
+    } catch {
       setKeyStatus("error");
       setTimeout(() => setKeyStatus("idle"), 3000);
     }
@@ -82,8 +108,17 @@ export default function PostPage() {
     setUpdateStatus("checking");
     setUpdateInfo(null);
     try {
-      // window.electronAPI is injected by the Electron preload; absent in a browser.
-      const api = (window as unknown as { electronAPI?: { checkForUpdates: () => Promise<{ status: string; version?: string; message?: string }> } }).electronAPI;
+      const api = (
+        window as unknown as {
+          electronAPI?: {
+            checkForUpdates: () => Promise<{
+              status: string;
+              version?: string;
+              message?: string;
+            }>;
+          };
+        }
+      ).electronAPI;
       if (!api) {
         setUpdateStatus("idle");
         return;
@@ -97,23 +132,18 @@ export default function PostPage() {
     }
   }
 
-  // Detect if running inside Electron (preload injects window.electronAPI)
-  const isElectron = typeof window !== "undefined" &&
+  const isElectron =
+    typeof window !== "undefined" &&
     !!(window as unknown as { electronAPI?: unknown }).electronAPI;
 
+  // ---- New Listing logic ----
   const allImages = property?.imageUrls ?? [];
 
   const interiorPages = useMemo(() => {
-    const interior = picks.slice(1); // drop cover
-    const pages: {
-      topImageUrl: string;
-      bottomImageUrl?: string;
-    }[] = [];
+    const interior = picks.slice(1);
+    const pages: { topImageUrl: string; bottomImageUrl?: string }[] = [];
     for (let i = 0; i < interior.length; i += 2) {
-      pages.push({
-        topImageUrl: interior[i],
-        bottomImageUrl: interior[i + 1],
-      });
+      pages.push({ topImageUrl: interior[i], bottomImageUrl: interior[i + 1] });
     }
     return pages;
   }, [picks]);
@@ -139,7 +169,6 @@ export default function PostPage() {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "scrape failed");
-
       const p: Property = data.property;
       setProperty(p);
       const detected = p.suggestedOffice ?? OFFICES[0];
@@ -180,15 +209,12 @@ export default function PostPage() {
       });
 
       if (!r.ok || !r.body) {
-        // Non-streaming error response
         const text = await r.text();
         let msg = "render failed";
         try { msg = JSON.parse(text).error || msg; } catch { /* ignore */ }
         throw new Error(msg);
       }
 
-      // Read the NDJSON stream — pages arrive one at a time so the preview
-      // updates progressively and we never buffer a huge single JSON blob.
       const reader = r.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -199,18 +225,17 @@ export default function PostPage() {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";          // keep incomplete last line
+        buffer = lines.pop() ?? "";
         for (const line of lines) {
           if (!line.trim()) continue;
           const obj = JSON.parse(line) as { page?: string; error?: string };
           if (obj.error) throw new Error(obj.error);
           if (obj.page) {
             pages.push(obj.page);
-            setRenderedPages([...pages]);    // show each page as it arrives
+            setRenderedPages([...pages]);
           }
         }
       }
-      // Flush any remaining content in the buffer
       if (buffer.trim()) {
         const obj = JSON.parse(buffer) as { page?: string; error?: string };
         if (obj.error) throw new Error(obj.error);
@@ -230,11 +255,9 @@ export default function PostPage() {
     setPicks((prev) => {
       const idx = prev.indexOf(imgUrl);
       if (idx >= 0) {
-        // Removing the cover is always fine.
-        // Removing an interior image is only allowed if the result is even.
         if (idx > 0) {
-          const newInteriorCount = prev.length - 1 - 1; // -1 for cover, -1 for this image
-          if (newInteriorCount % 2 !== 0) return prev; // would leave an odd count — block
+          const newInteriorCount = prev.length - 1 - 1;
+          if (newInteriorCount % 2 !== 0) return prev;
         }
         return prev.filter((u) => u !== imgUrl);
       }
@@ -285,14 +308,12 @@ export default function PostPage() {
       .replace(/[^a-z0-9]+/gi, "-")
       .replace(/^-+|-+$/g, "")
       .toLowerCase();
-
     const zip = new JSZip();
     const folder = zip.folder(folderName)!;
     renderedPages.forEach((dataUrl, i) => {
       const base64 = dataUrl.split(",", 2)[1];
       folder.file(`page-${i + 1}.png`, base64, { base64: true });
     });
-
     const blob = await zip.generateAsync({ type: "blob" });
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -304,14 +325,163 @@ export default function PostPage() {
     URL.revokeObjectURL(objectUrl);
   }
 
+  // ---- Sale Agreed / Reduced logic ----
+  async function handleScrapeSingle(e: React.FormEvent) {
+    e.preventDefault();
+    const urls = singleRawUrls
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (urls.length === 0) return;
+    setError(null);
+    setSingleItems([]);
+    setSingleRendered([]);
+    setSingleScrapeProgress({ done: 0, total: urls.length });
+    setBusy("scraping-multi");
+    try {
+      const results: SingleItem[] = [];
+      for (let i = 0; i < urls.length; i++) {
+        const u = urls[i];
+        const r = await fetch("/api/post/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: u }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(`${u}: ${data.error || "scrape failed"}`);
+        const p: Property = data.property;
+        const det = p.suggestedOffice ?? OFFICES[0];
+        results.push({
+          url: u,
+          property: p,
+          selectedImageUrl: p.imageUrls[0] ?? "",
+          shortAddress: p.shortAddress,
+          office: det.label,
+          phone: det.phone,
+          website: "www.langtownandcountry.com",
+          price: p.price,
+        });
+        setSingleScrapeProgress({ done: i + 1, total: urls.length });
+      }
+      setSingleItems(results);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+      setSingleScrapeProgress(null);
+    }
+  }
+
+  async function handleRenderSingle() {
+    if (singleItems.length === 0) return;
+    setError(null);
+    setSingleRendered(new Array(singleItems.length).fill(""));
+    setBusy("rendering-multi");
+    try {
+      const items = singleItems.map((item) => ({
+        type: mode,
+        data:
+          mode === "sale-agreed"
+            ? {
+                shortAddress: item.shortAddress,
+                office: item.office,
+                phone: item.phone,
+                website: item.website,
+                backgroundImageUrl: item.selectedImageUrl,
+              }
+            : {
+                shortAddress: item.shortAddress,
+                price: item.price,
+                backgroundImageUrl: item.selectedImageUrl,
+              },
+      }));
+
+      const r = await fetch("/api/post/single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+
+      if (!r.ok || !r.body) {
+        const text = await r.text();
+        let msg = "render failed";
+        try { msg = JSON.parse(text).error || msg; } catch { /* ignore */ }
+        throw new Error(msg);
+      }
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const pages: string[] = new Array(singleItems.length).fill("");
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const obj = JSON.parse(line) as { index?: number; page?: string; error?: string };
+          if (obj.error) throw new Error(obj.error);
+          if (typeof obj.index === "number" && obj.page) {
+            pages[obj.index] = obj.page;
+            setSingleRendered([...pages]);
+          }
+        }
+      }
+      if (buffer.trim()) {
+        const obj = JSON.parse(buffer) as { index?: number; page?: string; error?: string };
+        if (obj.error) throw new Error(obj.error);
+        if (typeof obj.index === "number" && obj.page) {
+          pages[obj.index] = obj.page;
+          setSingleRendered([...pages]);
+        }
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function downloadSingleZip() {
+    const hasAny = singleRendered.some(Boolean);
+    if (!hasAny) return;
+    const label = mode === "sale-agreed" ? "sale-agreed" : "reduced";
+    const zip = new JSZip();
+    const folder = zip.folder(label)!;
+    singleItems.forEach((item, i) => {
+      if (singleRendered[i]) {
+        const base64 = singleRendered[i].split(",", 2)[1];
+        const slug = item.shortAddress
+          .replace(/[^a-z0-9]+/gi, "-")
+          .replace(/^-+|-+$/g, "")
+          .toLowerCase();
+        folder.file(`${i + 1}-${slug}.png`, base64, { base64: true });
+      }
+    });
+    const blob = await zip.generateAsync({ type: "blob" });
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = `${label}-${Date.now()}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  const anyBusy = busy !== "";
+  const singleRenderedCount = singleRendered.filter(Boolean).length;
+
   return (
     <main className="mx-auto max-w-7xl p-6">
       <header className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Lang Property Poster</h1>
           <p className="mt-1 text-slate-600">
-            Paste a Lang property URL → first photo you click becomes the
-            cover, the rest fill the inside pages.
+            Create polished property social media images in seconds.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -361,7 +531,6 @@ export default function PostPage() {
               </button>
             </div>
 
-            {/* Updates section — only shown inside the Electron app */}
             {isElectron && (
               <div className="mt-5 border-t border-slate-200 pt-5">
                 <div className="mb-2 text-sm font-medium text-slate-700">Updates</div>
@@ -397,7 +566,12 @@ export default function PostPage() {
 
             <div className="mt-5 flex justify-end">
               <button
-                onClick={() => { setShowSettings(false); setNewKey(""); setKeyStatus("idle"); setUpdateStatus("idle"); }}
+                onClick={() => {
+                  setShowSettings(false);
+                  setNewKey("");
+                  setKeyStatus("idle");
+                  setUpdateStatus("idle");
+                }}
                 className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600"
               >
                 Close
@@ -407,24 +581,23 @@ export default function PostPage() {
         </div>
       )}
 
-      <form onSubmit={handleGenerate} className="mb-6 flex gap-2">
-        <input
-          type="url"
-          required
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://www.langtownandcountry.com/property/..."
-          className="flex-1 rounded border border-slate-300 px-3 py-2"
-          disabled={busy !== ""}
-        />
-        <button
-          type="submit"
-          disabled={busy !== ""}
-          className="rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
-        >
-          {busy === "scraping" ? "Loading…" : "Load listing"}
-        </button>
-      </form>
+      {/* Mode selector */}
+      <div className="mb-6 flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 w-fit">
+        {(["new-listing", "sale-agreed", "reduced"] as AppMode[]).map((m) => (
+          <button
+            key={m}
+            onClick={() => switchMode(m)}
+            disabled={anyBusy}
+            className={`rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+              mode === m
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {m === "new-listing" ? "New Listing" : m === "sale-agreed" ? "Sale Agreed" : "Reduced"}
+          </button>
+        ))}
+      </div>
 
       {error && (
         <div className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-red-800">
@@ -432,347 +605,534 @@ export default function PostPage() {
         </div>
       )}
 
-      {property && cover && (
-        <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
-          {/* LEFT: cover edit panel */}
-          <section className="rounded border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 font-semibold">Cover details</h2>
-            <div className="grid gap-3">
-              <Field label="Short address">
-                <input
-                  className="w-full rounded border border-slate-300 px-2 py-1"
-                  value={cover.shortAddress}
-                  onChange={(e) =>
-                    setCover({ ...cover, shortAddress: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Status">
-                <select
-                  className="w-full rounded border border-slate-300 px-2 py-1"
-                  value={cover.status}
-                  onChange={(e) => setCover({ ...cover, status: e.target.value })}
-                >
-                  {STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Bedrooms">
-                  <input
-                    type="number"
-                    className="w-full rounded border border-slate-300 px-2 py-1"
-                    value={cover.bedrooms ?? ""}
-                    onChange={(e) =>
-                      setCover({
-                        ...cover,
-                        bedrooms: e.target.value ? Number(e.target.value) : null,
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="Bathrooms">
-                  <input
-                    type="number"
-                    className="w-full rounded border border-slate-300 px-2 py-1"
-                    value={cover.bathrooms ?? ""}
-                    onChange={(e) =>
-                      setCover({
-                        ...cover,
-                        bathrooms: e.target.value ? Number(e.target.value) : null,
-                      })
-                    }
-                  />
-                </Field>
-              </div>
-              <Field label="Office">
-                <select
-                  className="w-full rounded border border-slate-300 px-2 py-1"
-                  value={cover.office}
-                  onChange={(e) => {
-                    const o = OFFICES.find((x) => x.label === e.target.value);
-                    setCover({
-                      ...cover,
-                      office: e.target.value,
-                      phone: o?.phone || cover.phone,
-                    });
-                  }}
-                >
-                  {OFFICES.map((o) => (
-                    <option key={o.label} value={o.label}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Phone">
-                <input
-                  className="w-full rounded border border-slate-300 px-2 py-1"
-                  value={cover.phone}
-                  onChange={(e) => setCover({ ...cover, phone: e.target.value })}
-                />
-              </Field>
-              <Field label="Website">
-                <input
-                  className="w-full rounded border border-slate-300 px-2 py-1"
-                  value={cover.website}
-                  onChange={(e) =>
-                    setCover({ ...cover, website: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="EPC rating (used in caption)">
-                <input
-                  maxLength={4}
-                  placeholder="e.g. B"
-                  className="w-full rounded border border-slate-300 px-2 py-1 uppercase"
-                  value={cover.epcRating}
-                  onChange={(e) =>
-                    setCover({
-                      ...cover,
-                      epcRating: e.target.value.toUpperCase(),
-                    })
-                  }
-                />
-              </Field>
-            </div>
-
-            <div className="mt-5 rounded bg-slate-50 p-3 text-sm">
-              <div className="mb-1 text-xs text-slate-500">
-                Selection summary
-              </div>
-              <div>
-                <strong>{picks.length}</strong>{" "}
-                {picks.length === 1 ? "image" : "images"} selected →{" "}
-                <strong>{totalPages}</strong>-page post
-              </div>
-              <div className="mt-1 text-xs text-slate-500">
-                {picks.length === 0
-                  ? "Click photos on the right. First one is the cover."
-                  : `Cover + ${interiorPages.length} inside ${
-                      interiorPages.length === 1 ? "page" : "pages"
-                    }. Photos crop to keep the LTC watermark visible.`}
-              </div>
-            </div>
-
-            {oddInterior && (
-              <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                Select <strong>1 more photo</strong> to complete the pair — each inside slide needs 2 images.
-              </div>
-            )}
-
+      {/* ===== NEW LISTING ===== */}
+      {mode === "new-listing" && (
+        <>
+          <form onSubmit={handleGenerate} className="mb-6 flex gap-2">
+            <input
+              type="url"
+              required
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://www.langtownandcountry.com/property/..."
+              className="flex-1 rounded border border-slate-300 px-3 py-2"
+              disabled={anyBusy}
+            />
             <button
-              onClick={doRender}
-              disabled={busy !== "" || picks.length === 0 || oddInterior}
-              className="mt-5 w-full rounded bg-slate-900 px-4 py-3 font-medium text-white disabled:opacity-40"
+              type="submit"
+              disabled={anyBusy}
+              className="rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
             >
-              {busy === "rendering"
-                ? renderedPages.length > 0
-                  ? `Rendering… (${renderedPages.length}/${totalPages})`
-                  : "Rendering…"
-                : `Render ${totalPages} ${totalPages === 1 ? "page" : "pages"}`}
+              {busy === "scraping" ? "Loading…" : "Load listing"}
             </button>
-            {renderedPages.length > 0 && (
-              <button
-                onClick={downloadAll}
-                className="mt-2 w-full rounded border border-slate-900 px-4 py-3 font-medium text-slate-900"
-              >
-                Download zip ({renderedPages.length} PNGs)
-              </button>
-            )}
-          </section>
+          </form>
 
-          {/* RIGHT: image grid + preview */}
-          <section>
-            <div className="mb-2 flex items-center justify-between gap-4">
-              <h2 className="font-semibold">
-                Photos from listing ({allImages.length})
-              </h2>
-              <label className="flex items-center gap-2 text-xs text-slate-500">
-                Size
-                <input
-                  type="range"
-                  min={100}
-                  max={360}
-                  step={10}
-                  value={thumbSize}
-                  onChange={(e) => setThumbSize(Number(e.target.value))}
-                  className="w-32 accent-slate-700"
-                />
-              </label>
-            </div>
-            <p className="mb-3 text-xs text-slate-500">
-              <strong>Click a photo</strong> to add/remove it from the post.
-              The first one becomes the cover background. Interior photos are
-              always in pairs (2 per slide). Up to {MAX_TOTAL_IMAGES} photos
-              total.
-            </p>
-
-            <div
-              className="mb-6 grid gap-3"
-              style={{
-                gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`,
-              }}
-            >
-              {allImages.map((u) => {
-                const idx = picks.indexOf(u);
-                const selected = idx >= 0;
-                const isCover = idx === 0;
-                const orderLabel = isCover ? "COVER" : idx > 0 ? String(idx) : null;
-                return (
-                  <button
-                    type="button"
-                    key={u}
-                    onClick={() => togglePick(u)}
-                    className={`relative block w-full overflow-hidden rounded-md border-2 transition ${
-                      selected
-                        ? isCover
-                          ? "border-amber-500 ring-2 ring-amber-200"
-                          : "border-blue-500 ring-2 ring-blue-200"
-                        : "border-transparent hover:border-slate-300"
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={u}
-                      alt=""
-                      className="aspect-[4/3] w-full object-cover"
+          {property && cover && (
+            <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
+              {/* LEFT: cover edit panel */}
+              <section className="rounded border border-slate-200 bg-white p-4">
+                <h2 className="mb-3 font-semibold">Cover details</h2>
+                <div className="grid gap-3">
+                  <Field label="Short address">
+                    <input
+                      className="w-full rounded border border-slate-300 px-2 py-1"
+                      value={cover.shortAddress}
+                      onChange={(e) => setCover({ ...cover, shortAddress: e.target.value })}
                     />
-                    {orderLabel && (
-                      <span
-                        className={`absolute left-1 top-1 flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-xs font-bold text-white shadow ${
-                          isCover ? "bg-amber-500" : "bg-blue-600"
-                        }`}
-                      >
-                        {orderLabel}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <h2 className="mb-3 font-semibold">Preview</h2>
-            {renderedPages.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {renderedPages.map((src, pageIdx) => (
-                  <div
-                    key={pageIdx}
-                    className="overflow-hidden rounded border border-slate-200 bg-white"
-                  >
-                    <div className="bg-slate-50 px-2 py-1 text-xs text-slate-500">
-                      Page {pageIdx + 1}
-                    </div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={src}
-                      alt={`Page ${pageIdx + 1}`}
-                      className="w-full"
-                    />
+                  </Field>
+                  <Field label="Status">
+                    <select
+                      className="w-full rounded border border-slate-300 px-2 py-1"
+                      value={cover.status}
+                      onChange={(e) => setCover({ ...cover, status: e.target.value })}
+                    >
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Bedrooms">
+                      <input
+                        type="number"
+                        className="w-full rounded border border-slate-300 px-2 py-1"
+                        value={cover.bedrooms ?? ""}
+                        onChange={(e) =>
+                          setCover({ ...cover, bedrooms: e.target.value ? Number(e.target.value) : null })
+                        }
+                      />
+                    </Field>
+                    <Field label="Bathrooms">
+                      <input
+                        type="number"
+                        className="w-full rounded border border-slate-300 px-2 py-1"
+                        value={cover.bathrooms ?? ""}
+                        onChange={(e) =>
+                          setCover({ ...cover, bathrooms: e.target.value ? Number(e.target.value) : null })
+                        }
+                      />
+                    </Field>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-                Pick photos above and click <strong>Render</strong>.
-              </div>
-            )}
-          </section>
-        </div>
-      )}
+                  <Field label="Office">
+                    <select
+                      className="w-full rounded border border-slate-300 px-2 py-1"
+                      value={cover.office}
+                      onChange={(e) => {
+                        const o = OFFICES.find((x) => x.label === e.target.value);
+                        setCover({ ...cover, office: e.target.value, phone: o?.phone || cover.phone });
+                      }}
+                    >
+                      {OFFICES.map((o) => (
+                        <option key={o.label} value={o.label}>{o.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Phone">
+                    <input
+                      className="w-full rounded border border-slate-300 px-2 py-1"
+                      value={cover.phone}
+                      onChange={(e) => setCover({ ...cover, phone: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Website">
+                    <input
+                      className="w-full rounded border border-slate-300 px-2 py-1"
+                      value={cover.website}
+                      onChange={(e) => setCover({ ...cover, website: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="EPC rating (used in caption)">
+                    <input
+                      maxLength={4}
+                      placeholder="e.g. B"
+                      className="w-full rounded border border-slate-300 px-2 py-1 uppercase"
+                      value={cover.epcRating}
+                      onChange={(e) =>
+                        setCover({ ...cover, epcRating: e.target.value.toUpperCase() })
+                      }
+                    />
+                  </Field>
+                </div>
 
-      {property && cover && (
-        <section className="mt-8 rounded border border-slate-200 bg-white p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-semibold">Captions</h2>
-            <div className="flex gap-2">
-              <button
-                onClick={handleCaption}
-                disabled={busy !== ""}
-                className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {busy === "captioning"
-                  ? "Generating…"
-                  : captions
-                    ? "Regenerate"
-                    : "Generate captions"}
-              </button>
-              {captions && (
-                <button
-                  onClick={copyCaption}
-                  className="rounded border border-slate-300 px-4 py-2 text-sm font-medium text-slate-900"
-                >
-                  {copied ? "Copied!" : "Copy"}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Tabs */}
-          <div className="mb-3 flex border-b border-slate-200">
-            <button
-              onClick={() => setCaptionTab("social")}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                captionTab === "social"
-                  ? "border-slate-900 text-slate-900"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              Facebook / Instagram / LinkedIn
-            </button>
-            <button
-              onClick={() => setCaptionTab("x")}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                captionTab === "x"
-                  ? "border-slate-900 text-slate-900"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              X (Twitter)
-            </button>
-          </div>
-
-          {captions ? (
-            <>
-              {captionTab === "social" && (
-                <textarea
-                  value={captions.longForm}
-                  onChange={(e) => setCaptions({ ...captions, longForm: e.target.value })}
-                  className="h-96 w-full rounded border border-slate-300 p-3 font-mono text-sm leading-relaxed"
-                />
-              )}
-              {captionTab === "x" && (
-                <div>
-                  <textarea
-                    value={captions.xCaption}
-                    onChange={(e) => setCaptions({ ...captions, xCaption: e.target.value })}
-                    className="h-32 w-full rounded border border-slate-300 p-3 font-mono text-sm leading-relaxed"
-                    maxLength={280}
-                  />
-                  <div className={`mt-1 text-right text-xs ${captions.xCaption.length > 280 ? "text-red-600 font-semibold" : captions.xCaption.length > 260 ? "text-amber-600" : "text-slate-400"}`}>
-                    {captions.xCaption.length} / 280 characters
+                <div className="mt-5 rounded bg-slate-50 p-3 text-sm">
+                  <div className="mb-1 text-xs text-slate-500">Selection summary</div>
+                  <div>
+                    <strong>{picks.length}</strong>{" "}
+                    {picks.length === 1 ? "image" : "images"} selected →{" "}
+                    <strong>{totalPages}</strong>-page post
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {picks.length === 0
+                      ? "Click photos on the right. First one is the cover."
+                      : `Cover + ${interiorPages.length} inside ${interiorPages.length === 1 ? "page" : "pages"}. Photos crop to keep the LTC watermark visible.`}
                   </div>
                 </div>
-              )}
-            </>
-          ) : (
-            <div className="rounded border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              Click <strong>Generate captions</strong> to draft posts for all platforms. You can edit before copying.
+
+                {oddInterior && (
+                  <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                    Select <strong>1 more photo</strong> to complete the pair — each inside slide needs 2 images.
+                  </div>
+                )}
+
+                <button
+                  onClick={doRender}
+                  disabled={anyBusy || picks.length === 0 || oddInterior}
+                  className="mt-5 w-full rounded bg-slate-900 px-4 py-3 font-medium text-white disabled:opacity-40"
+                >
+                  {busy === "rendering"
+                    ? renderedPages.length > 0
+                      ? `Rendering… (${renderedPages.length}/${totalPages})`
+                      : "Rendering…"
+                    : `Render ${totalPages} ${totalPages === 1 ? "page" : "pages"}`}
+                </button>
+                {renderedPages.length > 0 && (
+                  <button
+                    onClick={downloadAll}
+                    className="mt-2 w-full rounded border border-slate-900 px-4 py-3 font-medium text-slate-900"
+                  >
+                    Download zip ({renderedPages.length} PNGs)
+                  </button>
+                )}
+              </section>
+
+              {/* RIGHT: image grid + preview */}
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-4">
+                  <h2 className="font-semibold">Photos from listing ({allImages.length})</h2>
+                  <label className="flex items-center gap-2 text-xs text-slate-500">
+                    Size
+                    <input
+                      type="range"
+                      min={100}
+                      max={360}
+                      step={10}
+                      value={thumbSize}
+                      onChange={(e) => setThumbSize(Number(e.target.value))}
+                      className="w-32 accent-slate-700"
+                    />
+                  </label>
+                </div>
+                <p className="mb-3 text-xs text-slate-500">
+                  <strong>Click a photo</strong> to add/remove it from the post. The first one becomes the cover
+                  background. Interior photos are always in pairs (2 per slide). Up to {MAX_TOTAL_IMAGES} photos total.
+                </p>
+
+                <div
+                  className="mb-6 grid gap-3"
+                  style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}
+                >
+                  {allImages.map((u) => {
+                    const idx = picks.indexOf(u);
+                    const selected = idx >= 0;
+                    const isCover = idx === 0;
+                    const orderLabel = isCover ? "COVER" : idx > 0 ? String(idx) : null;
+                    return (
+                      <button
+                        type="button"
+                        key={u}
+                        onClick={() => togglePick(u)}
+                        className={`relative block w-full overflow-hidden rounded-md border-2 transition ${
+                          selected
+                            ? isCover
+                              ? "border-amber-500 ring-2 ring-amber-200"
+                              : "border-blue-500 ring-2 ring-blue-200"
+                            : "border-transparent hover:border-slate-300"
+                        }`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={u} alt="" className="aspect-[4/3] w-full object-cover" />
+                        {orderLabel && (
+                          <span
+                            className={`absolute left-1 top-1 flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-xs font-bold text-white shadow ${
+                              isCover ? "bg-amber-500" : "bg-blue-600"
+                            }`}
+                          >
+                            {orderLabel}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <h2 className="mb-3 font-semibold">Preview</h2>
+                {renderedPages.length > 0 ? (
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {renderedPages.map((src, pageIdx) => (
+                      <div
+                        key={pageIdx}
+                        className="overflow-hidden rounded border border-slate-200 bg-white"
+                      >
+                        <div className="bg-slate-50 px-2 py-1 text-xs text-slate-500">
+                          Page {pageIdx + 1}
+                        </div>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={src} alt={`Page ${pageIdx + 1}`} className="w-full" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+                    Pick photos above and click <strong>Render</strong>.
+                  </div>
+                )}
+              </section>
             </div>
           )}
 
-          {!cover.epcRating && (
-            <p className="mt-2 text-xs text-amber-700">
-              Heads up: no EPC rating set — caption will omit that line. Add
-              one in the cover panel above if you want it included.
-            </p>
+          {property && cover && (
+            <section className="mt-8 rounded border border-slate-200 bg-white p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-semibold">Captions</h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCaption}
+                    disabled={anyBusy}
+                    className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {busy === "captioning" ? "Generating…" : captions ? "Regenerate" : "Generate captions"}
+                  </button>
+                  {captions && (
+                    <button
+                      onClick={copyCaption}
+                      className="rounded border border-slate-300 px-4 py-2 text-sm font-medium text-slate-900"
+                    >
+                      {copied ? "Copied!" : "Copy"}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mb-3 flex border-b border-slate-200">
+                <button
+                  onClick={() => setCaptionTab("social")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    captionTab === "social"
+                      ? "border-slate-900 text-slate-900"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Facebook / Instagram / LinkedIn
+                </button>
+                <button
+                  onClick={() => setCaptionTab("x")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    captionTab === "x"
+                      ? "border-slate-900 text-slate-900"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  X (Twitter)
+                </button>
+              </div>
+
+              {captions ? (
+                <>
+                  {captionTab === "social" && (
+                    <textarea
+                      value={captions.longForm}
+                      onChange={(e) => setCaptions({ ...captions, longForm: e.target.value })}
+                      className="h-96 w-full rounded border border-slate-300 p-3 font-mono text-sm leading-relaxed"
+                    />
+                  )}
+                  {captionTab === "x" && (
+                    <div>
+                      <textarea
+                        value={captions.xCaption}
+                        onChange={(e) => setCaptions({ ...captions, xCaption: e.target.value })}
+                        className="h-32 w-full rounded border border-slate-300 p-3 font-mono text-sm leading-relaxed"
+                        maxLength={280}
+                      />
+                      <div
+                        className={`mt-1 text-right text-xs ${
+                          captions.xCaption.length > 280
+                            ? "text-red-600 font-semibold"
+                            : captions.xCaption.length > 260
+                              ? "text-amber-600"
+                              : "text-slate-400"
+                        }`}
+                      >
+                        {captions.xCaption.length} / 280 characters
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+                  Click <strong>Generate captions</strong> to draft posts for all platforms. You can edit before copying.
+                </div>
+              )}
+
+              {!cover.epcRating && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Heads up: no EPC rating set — caption will omit that line. Add one in the cover panel above if you
+                  want it included.
+                </p>
+              )}
+            </section>
           )}
-        </section>
+        </>
       )}
 
+      {/* ===== SALE AGREED / REDUCED ===== */}
+      {(mode === "sale-agreed" || mode === "reduced") && (
+        <>
+          <div className="mb-2 text-sm text-slate-600">
+            {mode === "sale-agreed"
+              ? "Paste one property URL per line. Each produces a single Sale Agreed poster."
+              : "Paste one property URL per line. Each produces a single Reduced poster."}
+          </div>
+          <form onSubmit={handleScrapeSingle} className="mb-6">
+            <textarea
+              required
+              value={singleRawUrls}
+              onChange={(e) => setSingleRawUrls(e.target.value)}
+              rows={4}
+              placeholder={"https://www.langtownandcountry.com/property/...\nhttps://www.langtownandcountry.com/property/..."}
+              className="w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+              disabled={anyBusy}
+            />
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={anyBusy || !singleRawUrls.trim()}
+                className="rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
+              >
+                {busy === "scraping-multi"
+                  ? singleScrapeProgress
+                    ? `Loading… (${singleScrapeProgress.done}/${singleScrapeProgress.total})`
+                    : "Loading…"
+                  : "Load listings"}
+              </button>
+              {singleItems.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleRenderSingle}
+                    disabled={anyBusy}
+                    className="rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
+                  >
+                    {busy === "rendering-multi"
+                      ? `Rendering… (${singleRenderedCount}/${singleItems.length})`
+                      : `Render ${singleItems.length} ${singleItems.length === 1 ? "poster" : "posters"}`}
+                  </button>
+                  {singleRenderedCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={downloadSingleZip}
+                      className="rounded border border-slate-900 px-4 py-2 font-medium text-slate-900"
+                    >
+                      Download zip ({singleRenderedCount} PNGs)
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </form>
+
+          {singleItems.length > 0 && (
+            <div className="grid gap-4">
+              {singleItems.map((item, i) => (
+                <div key={item.url} className="rounded border border-slate-200 bg-white p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                      {i + 1}
+                    </span>
+                    <span className="font-medium">{item.shortAddress}</span>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+                    <div className="grid gap-3">
+                      <Field label="Address">
+                        <input
+                          className="w-full rounded border border-slate-300 px-2 py-1"
+                          value={item.shortAddress}
+                          onChange={(e) => {
+                            const updated = [...singleItems];
+                            updated[i] = { ...item, shortAddress: e.target.value };
+                            setSingleItems(updated);
+                          }}
+                        />
+                      </Field>
+
+                      {mode === "sale-agreed" && (
+                        <>
+                          <Field label="Office">
+                            <select
+                              className="w-full rounded border border-slate-300 px-2 py-1"
+                              value={item.office}
+                              onChange={(e) => {
+                                const o = OFFICES.find((x) => x.label === e.target.value);
+                                const updated = [...singleItems];
+                                updated[i] = { ...item, office: e.target.value, phone: o?.phone || item.phone };
+                                setSingleItems(updated);
+                              }}
+                            >
+                              {OFFICES.map((o) => (
+                                <option key={o.label} value={o.label}>{o.label}</option>
+                              ))}
+                            </select>
+                          </Field>
+                          <Field label="Phone">
+                            <input
+                              className="w-full rounded border border-slate-300 px-2 py-1"
+                              value={item.phone}
+                              onChange={(e) => {
+                                const updated = [...singleItems];
+                                updated[i] = { ...item, phone: e.target.value };
+                                setSingleItems(updated);
+                              }}
+                            />
+                          </Field>
+                          <Field label="Website">
+                            <input
+                              className="w-full rounded border border-slate-300 px-2 py-1"
+                              value={item.website}
+                              onChange={(e) => {
+                                const updated = [...singleItems];
+                                updated[i] = { ...item, website: e.target.value };
+                                setSingleItems(updated);
+                              }}
+                            />
+                          </Field>
+                        </>
+                      )}
+
+                      {mode === "reduced" && (
+                        <Field label="Price">
+                          <input
+                            className="w-full rounded border border-slate-300 px-2 py-1"
+                            value={item.price}
+                            onChange={(e) => {
+                              const updated = [...singleItems];
+                              updated[i] = { ...item, price: e.target.value };
+                              setSingleItems(updated);
+                            }}
+                          />
+                        </Field>
+                      )}
+
+                      {/* Image picker */}
+                      <div>
+                        <div className="mb-1 block text-xs font-medium text-slate-600">
+                          Background image (click to select)
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {item.property.imageUrls.map((imgUrl) => {
+                            const selected = item.selectedImageUrl === imgUrl;
+                            return (
+                              <button
+                                type="button"
+                                key={imgUrl}
+                                onClick={() => {
+                                  const updated = [...singleItems];
+                                  updated[i] = { ...item, selectedImageUrl: imgUrl };
+                                  setSingleItems(updated);
+                                }}
+                                className={`relative h-16 w-24 flex-none overflow-hidden rounded border-2 transition ${
+                                  selected
+                                    ? "border-amber-500 ring-2 ring-amber-200"
+                                    : "border-transparent hover:border-slate-300"
+                                }`}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={imgUrl} alt="" className="h-full w-full object-cover" />
+                                {selected && (
+                                  <span className="absolute inset-0 flex items-center justify-center bg-amber-500/30 text-xs font-bold text-white">
+                                    ✓
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Preview */}
+                    <div className="flex flex-col items-center justify-start">
+                      {singleRendered[i] ? (
+                        <div className="overflow-hidden rounded border border-slate-200 w-full">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={singleRendered[i]} alt={`Poster ${i + 1}`} className="w-full" />
+                        </div>
+                      ) : busy === "rendering-multi" ? (
+                        <div className="flex h-32 w-full items-center justify-center rounded border border-dashed border-slate-300 text-sm text-slate-400">
+                          Rendering…
+                        </div>
+                      ) : (
+                        <div className="flex h-32 w-full items-center justify-center rounded border border-dashed border-slate-300 text-sm text-slate-400">
+                          Preview here
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </main>
   );
 }
@@ -786,9 +1146,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-600">
-        {label}
-      </span>
+      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
       {children}
     </label>
   );

@@ -56,6 +56,20 @@ export interface InteriorData {
   bottomImageUrl?: string;
 }
 
+export interface SaleAgreedData {
+  shortAddress: string;
+  office: string;
+  phone: string;
+  website: string;
+  backgroundImageUrl: string;
+}
+
+export interface ReducedData {
+  shortAddress: string;
+  price: string;
+  backgroundImageUrl: string;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -231,6 +245,80 @@ export async function renderInterior(data: InteriorData): Promise<Buffer> {
     .composite([
       { input: top, top: 0, left: 0 },
       { input: bottom, top: HALF_TOP + GAP, left: 0 },
+    ])
+    .png()
+    .toBuffer();
+}
+
+// ---------------------------------------------------------------------------
+// Sale Agreed — same layout as cover but no bed/bath icons, status fixed
+// ---------------------------------------------------------------------------
+
+export async function renderSaleAgreed(data: SaleAgreedData): Promise<Buffer> {
+  const imgBuf = await fetchBuffer(data.backgroundImageUrl);
+  const bgBuf = await cropToFill(imgBuf, PAGE_W, PAGE_H, "centre");
+
+  const dimSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}">
+  <rect width="${PAGE_W}" height="${PAGE_H}" fill="black" opacity="0.40"/>
+  ${svgText(data.shortAddress, PAGE_W / 2, 570, 46, { anchor: "middle" })}
+  ${svgText("SALE AGREED", PAGE_W / 2, 710, 120, { anchor: "middle" })}
+  ${svgText(data.office, PAGE_W / 2, 1180, 40, { anchor: "middle" })}
+  ${svgText(`Contact ${data.phone}`, PAGE_W / 2, 1235, 40, { anchor: "middle" })}
+  ${svgText(data.website, PAGE_W / 2, 1290, 40, { anchor: "middle" })}
+</svg>`;
+
+  const [svgBuf, logoBuf] = await Promise.all([
+    Promise.resolve(Buffer.from(dimSvg)),
+    scaledLogo(COVER_LOGO_W),
+  ]);
+
+  return sharp(bgBuf)
+    .composite([
+      { input: svgBuf, top: 0, left: 0 },
+      { input: logoBuf, top: COVER_LOGO_TOP, left: COVER_LOGO_LEFT },
+    ])
+    .png()
+    .toBuffer();
+}
+
+// ---------------------------------------------------------------------------
+// Reduced — logo top-right, overlay band, JUST REDUCED + address + price,
+// wave PNG across the bottom
+// ---------------------------------------------------------------------------
+
+const REDUCED_LOGO_W = 200;
+const REDUCED_LOGO_TOP = 40;
+const REDUCED_LOGO_LEFT = PAGE_W - REDUCED_LOGO_W - 40; // 840
+
+// Overlay band sits from y=580 to y=890; text is left-aligned within it.
+const OVERLAY_TOP = 580;
+const OVERLAY_BOT = 890;
+const TEXT_LEFT = 60;
+
+export async function renderReduced(data: ReducedData): Promise<Buffer> {
+  const imgBuf = await fetchBuffer(data.backgroundImageUrl);
+  const bgBuf = await cropToFill(imgBuf, PAGE_W, PAGE_H, "centre");
+
+  const overlaySvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}">
+  <rect x="0" y="${OVERLAY_TOP}" width="${PAGE_W}" height="${OVERLAY_BOT - OVERLAY_TOP}" fill="black" opacity="0.55"/>
+  ${svgText("JUST REDUCED", TEXT_LEFT, OVERLAY_TOP + 95, 72, { weight: "bold-italic", anchor: "start" })}
+  ${svgText(data.shortAddress, TEXT_LEFT, OVERLAY_TOP + 175, 52, { weight: "light", anchor: "start" })}
+  ${svgText(data.price, TEXT_LEFT, OVERLAY_TOP + 265, 70, { weight: "bold-italic", anchor: "start" })}
+</svg>`;
+
+  const [svgBuf, logoBuf, waveBuf] = await Promise.all([
+    Promise.resolve(Buffer.from(overlaySvg)),
+    scaledLogo(REDUCED_LOGO_W),
+    Promise.resolve(loadAsset("wave.png")),
+  ]);
+
+  return sharp(bgBuf)
+    .composite([
+      { input: svgBuf, top: 0, left: 0 },
+      { input: waveBuf, top: 0, left: 0 },
+      { input: logoBuf, top: REDUCED_LOGO_TOP, left: REDUCED_LOGO_LEFT },
     ])
     .png()
     .toBuffer();

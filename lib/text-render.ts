@@ -8,6 +8,7 @@ import fs from "node:fs";
 
 let _light: Font | null = null;
 let _regular: Font | null = null;
+let _boldItalic: Font | null = null;
 
 function fontPath(file: string): string {
   // In dev: <project>/fonts/<file>. In packaged Electron, the standalone
@@ -38,8 +39,12 @@ function regularFont(): Font {
   if (!_regular) _regular = loadFont("Poppins-Regular.ttf");
   return _regular;
 }
+function boldItalicFont(): Font {
+  if (!_boldItalic) _boldItalic = loadFont("Poppins-BoldItalic.ttf");
+  return _boldItalic;
+}
 
-export type Weight = "light" | "regular";
+export type Weight = "light" | "regular" | "bold-italic";
 export type Anchor = "start" | "middle" | "end";
 
 interface TextOpts {
@@ -94,7 +99,7 @@ export function svgText(
   opts: TextOpts = {},
 ): string {
   const { weight = "light", anchor = "start", fill = "white" } = opts;
-  const font = weight === "regular" ? regularFont() : lightFont();
+  const font = weight === "regular" ? regularFont() : weight === "bold-italic" ? boldItalicFont() : lightFont();
   const renderOpts = { kerning: false } as const;
   const advance = font.getAdvanceWidth(text, fontSize, renderOpts);
   let dx = 0;
