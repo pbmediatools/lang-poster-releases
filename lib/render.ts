@@ -111,21 +111,20 @@ async function buildCoverSvg(data: CoverData): Promise<string> {
   });
 
   // Count labels sit to the right of each icon PNG's visual content.
-  // Positions derived from the measured bounding boxes of the icon PNGs:
-  //   Bed  icon visual: x 269–391, y 777–871, centre y 824
-  //   Bath icon visual: x 594–717, y 767–881, centre y 824
-  // svgText y is the text baseline; for 56 px Poppins the baseline sits
-  // ~20 px below the visual centre of the glyphs, so countY = 824 + 20 = 844.
+  // Icons are 240×240px centred at (330,824) and (655,824):
+  //   Bed  icon: x 210–450, y 704–944
+  //   Bath icon: x 535–775, y 704–944
+  // Text baseline 20px below icon centre: 824 + 20 = 844.
   const countY = 844;
 
   const bedCount =
     data.bedrooms !== null && data.bedrooms !== undefined
-      ? svgText(`x${data.bedrooms}`, 403, countY, 56, { weight: "light", anchor: "start" })
+      ? svgText(`x${data.bedrooms}`, 458, countY, 56, { weight: "light", anchor: "start" })
       : "";
 
   const bathCount =
     data.bathrooms !== null && data.bathrooms !== undefined
-      ? svgText(`x${data.bathrooms}`, 729, countY, 56, { weight: "light", anchor: "start" })
+      ? svgText(`x${data.bathrooms}`, 783, countY, 56, { weight: "light", anchor: "start" })
       : "";
 
   const office = svgText(data.office, PAGE_W / 2, 1180, 40, {
