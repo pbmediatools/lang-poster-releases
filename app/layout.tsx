@@ -1,5 +1,13 @@
 import "./globals.css";
+import { Poppins } from "next/font/google";
 import type { Metadata } from "next";
+
+const poppins = Poppins({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-poppins",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Lang Property Poster",
@@ -13,7 +21,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-slate-50 text-slate-900">{children}</body>
+      <body className={`${poppins.variable} bg-slate-50 text-slate-900`}>{children}</body>
     </html>
   );
 }

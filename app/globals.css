@@ -3,9 +3,5 @@
 @tailwind utilities;
 
 body {
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--font-poppins), system-ui, sans-serif;
 }
