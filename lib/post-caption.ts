@@ -34,19 +34,21 @@ Structure:
 4. Blank line.
 5. A clear, calm viewing prompt (one sentence).
 6. Blank line.
-7. Footer — each item on its own line:
-   💷 {price}
-   📍 {area}
-   🌐 LangTownAndCountry.com
+7. Footer — each item on its own line, exactly as shown (no spaces between emoji and value except 📞):
+   💷{price}
+   ⚡{epcRating}  ← only include this line if epcRating is provided; omit entirely if null/missing
+   📌{shortAddress}
+   🔗{displayListingUrl}
    📞 {phone}
 8. One blank line, then 3–5 relevant hashtags on a single line. Choose from: #PlymouthProperty #LangTownAndCountry #PropertyForSale #ToLet #FamilyHome #SeaViews #WaterfrontLiving #PlymstockProperty #SouthHams #CornwallProperty #PropertyOfTheWeek
 
 X / TWITTER VERSION
-- MUST be under 280 characters total including the URL.
-- Open with status and key details: "FOR SALE | 3 Bed | £285,000" or "TO LET | 2 Bed | £950 PCM".
-- One short sentence on the strongest feature.
-- End with the full property URL.
-- No hashtags. No emojis.
+- ONE single line. No line breaks anywhere in xCaption.
+- MUST be under 280 characters total.
+- Format exactly: {STATUS} | {N} Bed | {price} — {one short benefit sentence ending with a full stop}. {displayListingUrl}
+- Use the displayListingUrl value exactly as supplied in the data — do not add http://, change capitalisation, or alter it in any way.
+- No hashtags. No emojis. No footer block. No extra lines.
+- Example: TO LET | 2 Bed | £950 pcm — Mid-terrace in Plymstock with a south-facing garden, recently decorated throughout. Langtownandcountry.com/property/example-street-plymstock/
 
 OUTPUT
 Return ONLY valid JSON with no preamble or markdown fences:
@@ -84,6 +86,7 @@ export async function generatePostCaption(
   const { property, phone } = input;
   const linkSuffix = deriveLinkSuffix(property.url);
   const area = deriveArea(property);
+  const displayListingUrl = `Langtownandcountry.com/property/${linkSuffix}/`;
 
   const userPayload = {
     address: property.address,
@@ -97,7 +100,7 @@ export async function generatePostCaption(
     features: property.features,
     description: property.description,
     area,
-    propertyUrl: `https://www.langtownandcountry.com/property/${linkSuffix}/`,
+    displayListingUrl,
     phone,
   };
 

@@ -102,9 +102,13 @@ export async function scrapeProperty(url: string): Promise<Property> {
 
   const status = /To Let|For Sale|Let Agreed|Sold/i.exec(bodyText)?.[0] || "";
 
-  // EPC rating — typically appears as "EPC Rating: B", "EPC: B", "EPC B" etc.
-  const epcMatch = bodyText.match(/EPC[^A-Za-z0-9]{0,8}(?:Rating[^A-Za-z0-9]{0,4})?([A-G])\b/i);
-  const epcRating = epcMatch ? epcMatch[1].toUpperCase() : null;
+  // EPC rating — try numeric score first (e.g. "EPC: 80"), then letter grade (e.g. "EPC: B")
+  const epcNumMatch = bodyText.match(/\bEPC\b[^A-Za-z0-9]{0,20}(\d{1,3})\b/i);
+  const epcLetterMatch = bodyText.match(/\bEPC\b[^A-Za-z0-9]{0,8}(?:Rating[^A-Za-z0-9]{0,4})?([A-G])\b/i);
+  const numericScore = epcNumMatch ? parseInt(epcNumMatch[1], 10) : null;
+  const epcRating = numericScore !== null && numericScore > 0 && numericScore <= 100
+    ? String(numericScore)
+    : epcLetterMatch ? epcLetterMatch[1].toUpperCase() : null;
 
   // Features list — find a UL near a "Features" heading
   const features: string[] = [];

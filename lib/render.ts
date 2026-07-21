@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import fs from "node:fs";
 import path from "node:path";
-import { svgText } from "./text-render";
+import { svgText, fontFaceStyle } from "./text-render";
 
 export const PAGE_W = 1080;
 export const PAGE_H = 1350;
@@ -28,12 +28,15 @@ async function scaledLogo(targetW: number): Promise<Buffer> {
   return sharp(loadAsset("ltc-logo.png")).resize(targetW, targetH).png().toBuffer();
 }
 
-// Bed and bath icons are already 1080×1350 — composite them at full size.
-function loadBedIcon(): Buffer {
-  return loadAsset("bed-icon.png");
-}
-function loadBathIcon(): Buffer {
-  return loadAsset("bath-icon.png");
+// Extract icon content from its full-size transparent PNG, then scale to targetH.
+// Returns the resized buffer and its actual width.
+async function extractIcon(filename: string, targetH: number): Promise<{ buf: Buffer; w: number }> {
+  const { data, info } = await sharp(loadAsset(filename))
+    .trim({ threshold: 0 })
+    .toBuffer({ resolveWithObject: true });
+  const w = Math.round(info.width * (targetH / info.height));
+  const buf = await sharp(data).resize(w, targetH).png().toBuffer();
+  return { buf, w };
 }
 
 // ---------------------------------------------------------------------------
@@ -107,72 +110,29 @@ async function cropToFill(
 }
 
 // ---------------------------------------------------------------------------
-// Cover SVG overlay (text only — logo, bed, bath all composited as real PNGs)
+// Cover layout constants
 // ---------------------------------------------------------------------------
 
-async function buildCoverSvg(data: CoverData): Promise<string> {
-  const status = (data.status || "FOR SALE").toUpperCase();
+const COVER_LOGO_W    = 420;
+const COVER_LOGO_H    = Math.round((COVER_LOGO_W / 250) * 150); // 252
+const COVER_LOGO_TOP  = 60;
+const COVER_LOGO_LEFT = Math.round((PAGE_W - COVER_LOGO_W) / 2); // 330
 
-  const dimOverlay = data.backgroundImageUrl
-    ? `<rect width="${PAGE_W}" height="${PAGE_H}" fill="black" opacity="0.35"/>`
-    : "";
+const COVER_ADDR_Y   = 500;  // address text baseline
+const COVER_STATUS_Y = 640;  // status text baseline ("FOR SALE")
 
-  const address = svgText(data.shortAddress, PAGE_W / 2, 570, 46, {
-    anchor: "middle",
-  });
-  const statusText = svgText(status, PAGE_W / 2, 700, 130, {
-    anchor: "middle",
-  });
+const COVER_ICON_H    = 98;  // display height for bed/bath icons (original reference size)
+const COVER_ICON_Y    = 824; // vertical centre of icon row (from reference PNG)
+const COVER_ICON_GAP  = 18;  // gap between icon right edge and "x2" label
+const COVER_PAIR_GAP  = 113; // gap between the two [icon + x2] pairs (from reference PNG)
+const COVER_COUNT_W   = 72;  // estimated px width of "x2" at COVER_COUNT_FONT
+const COVER_COUNT_FONT = 60;
 
-  // Count labels sit to the right of each icon PNG's visual content.
-  // Icons are 240×240px centred at (330,824) and (655,824):
-  //   Bed  icon: x 210–450, y 704–944
-  //   Bath icon: x 535–775, y 704–944
-  // Text baseline 20px below icon centre: 824 + 20 = 844.
-  const countY = 844;
-
-  const bedCount =
-    data.bedrooms !== null && data.bedrooms !== undefined
-      ? svgText(`x${data.bedrooms}`, 458, countY, 56, { weight: "light", anchor: "start" })
-      : "";
-
-  const bathCount =
-    data.bathrooms !== null && data.bathrooms !== undefined
-      ? svgText(`x${data.bathrooms}`, 783, countY, 56, { weight: "light", anchor: "start" })
-      : "";
-
-  const office = svgText(data.office, PAGE_W / 2, 1180, 40, {
-    anchor: "middle",
-  });
-  const phoneLine = svgText(`Contact ${data.phone}`, PAGE_W / 2, 1235, 40, {
-    anchor: "middle",
-  });
-  const website = svgText(data.website, PAGE_W / 2, 1290, 40, {
-    anchor: "middle",
-  });
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}" viewBox="0 0 ${PAGE_W} ${PAGE_H}">
-  ${dimOverlay}
-  ${address}
-  ${statusText}
-  ${bedCount}
-  ${bathCount}
-  ${office}
-  ${phoneLine}
-  ${website}
-</svg>`;
-}
+const COVER_FOOTER_Y = [1105, 1158, 1213]; // office / phone / website baselines
 
 // ---------------------------------------------------------------------------
 // Renderers
 // ---------------------------------------------------------------------------
-
-// Logo sits centred at the top of the cover.
-const COVER_LOGO_W = 420;
-const COVER_LOGO_H = Math.round((COVER_LOGO_W / 250) * 150); // 252
-const COVER_LOGO_TOP = 60;
-const COVER_LOGO_LEFT = Math.round((PAGE_W - COVER_LOGO_W) / 2); // 330
 
 export async function renderCover(data: CoverData): Promise<Buffer> {
   let baseInput: Buffer;
@@ -192,23 +152,64 @@ export async function renderCover(data: CoverData): Promise<Buffer> {
       .toBuffer();
   }
 
-  const [svg, logoBuf] = await Promise.all([
-    buildCoverSvg(data),
+  const hasBed  = data.bedrooms  !== null && data.bedrooms  !== undefined;
+  const hasBath = data.bathrooms !== null && data.bathrooms !== undefined;
+
+  // Extract and scale icons from their full-size transparent PNGs
+  const [bedIcon, bathIcon, logoBuf] = await Promise.all([
+    hasBed  ? extractIcon("bed-icon.png",  COVER_ICON_H) : null,
+    hasBath ? extractIcon("bath-icon.png", COVER_ICON_H) : null,
     scaledLogo(COVER_LOGO_W),
   ]);
 
-  const bedIconBuf = loadBedIcon();   // already 1080×1350, composite at (0,0)
-  const bathIconBuf = loadBathIcon(); // same
+  // Compute horizontal row layout and centre it on the canvas
+  let rowW = 0;
+  if (bedIcon)  rowW += bedIcon.w  + COVER_ICON_GAP + COVER_COUNT_W;
+  if (bedIcon && bathIcon) rowW += COVER_PAIR_GAP;
+  if (bathIcon) rowW += bathIcon.w + COVER_ICON_GAP + COVER_COUNT_W;
 
-  return sharp(baseInput)
-    .composite([
-      { input: Buffer.from(svg), top: 0, left: 0 },                    // dim + text
-      { input: bedIconBuf, top: 0, left: 0 },                          // bed icon PNG
-      { input: bathIconBuf, top: 0, left: 0 },                         // bath icon PNG
-      { input: logoBuf, top: COVER_LOGO_TOP, left: COVER_LOGO_LEFT },  // real logo
-    ])
-    .png()
-    .toBuffer();
+  let cur = Math.round((PAGE_W - rowW) / 2);
+  const iconTop  = COVER_ICON_Y - Math.round(COVER_ICON_H / 2);
+  const countY   = COVER_ICON_Y + 18;
+
+  let bedIconLeft = 0, bedCountX = 0;
+  if (bedIcon) {
+    bedIconLeft = cur;
+    bedCountX   = cur + bedIcon.w + COVER_ICON_GAP;
+    cur        += bedIcon.w + COVER_ICON_GAP + COVER_COUNT_W + (bathIcon ? COVER_PAIR_GAP : 0);
+  }
+  let bathIconLeft = 0, bathCountX = 0;
+  if (bathIcon) {
+    bathIconLeft = cur;
+    bathCountX   = cur + bathIcon.w + COVER_ICON_GAP;
+  }
+
+  const status = (data.status || "FOR SALE").toUpperCase();
+  const dimOverlay = data.backgroundImageUrl
+    ? `<rect width="${PAGE_W}" height="${PAGE_H}" fill="black" opacity="0.35"/>`
+    : "";
+
+  const coverSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}" viewBox="0 0 ${PAGE_W} ${PAGE_H}">
+  ${fontFaceStyle(["light"])}
+  ${dimOverlay}
+  ${svgText(data.shortAddress, PAGE_W / 2, COVER_ADDR_Y, 46, { anchor: "middle" })}
+  ${svgText(status, PAGE_W / 2, COVER_STATUS_Y, 130, { anchor: "middle" })}
+  ${hasBed  && data.bedrooms  !== null ? svgText(`x${data.bedrooms}`,  bedCountX,  countY, COVER_COUNT_FONT, { weight: "light", anchor: "start" }) : ""}
+  ${hasBath && data.bathrooms !== null ? svgText(`x${data.bathrooms}`, bathCountX, countY, COVER_COUNT_FONT, { weight: "light", anchor: "start" }) : ""}
+  ${svgText(data.office,               PAGE_W / 2, COVER_FOOTER_Y[0], 40, { anchor: "middle" })}
+  ${svgText(`Contact ${data.phone}`,   PAGE_W / 2, COVER_FOOTER_Y[1], 40, { anchor: "middle" })}
+  ${svgText(data.website,              PAGE_W / 2, COVER_FOOTER_Y[2], 40, { anchor: "middle" })}
+</svg>`;
+
+  const composites: sharp.OverlayOptions[] = [
+    { input: Buffer.from(coverSvg), top: 0, left: 0 },
+    ...(bedIcon  ? [{ input: bedIcon.buf,  top: iconTop, left: bedIconLeft  }] : []),
+    ...(bathIcon ? [{ input: bathIcon.buf, top: iconTop, left: bathIconLeft }] : []),
+    { input: logoBuf, top: COVER_LOGO_TOP, left: COVER_LOGO_LEFT },
+  ];
+
+  return sharp(baseInput).composite(composites).png().toBuffer();
 }
 
 export async function renderInterior(data: InteriorData): Promise<Buffer> {
@@ -260,6 +261,7 @@ export async function renderSaleAgreed(data: SaleAgreedData): Promise<Buffer> {
 
   const dimSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}">
+  ${fontFaceStyle(["light"])}
   <rect width="${PAGE_W}" height="${PAGE_H}" fill="black" opacity="0.40"/>
   ${svgText(data.shortAddress, PAGE_W / 2, 570, 46, { anchor: "middle" })}
   ${svgText("SALE AGREED", PAGE_W / 2, 710, 120, { anchor: "middle" })}
@@ -304,15 +306,18 @@ export async function renderReduced(data: ReducedData): Promise<Buffer> {
   const imgBuf = await fetchBuffer(data.backgroundImageUrl);
   const bgBuf = await cropToFill(imgBuf, PAGE_W, PAGE_H, "centre");
 
-  // SVG 1 — dark overlay rectangle only
+  // SVG 1 — dark overlay: parallelogram with diagonal right edge (doesn't span full width)
+  const oTopRight = Math.round(PAGE_W * 0.82);  // right edge at top (886)
+  const oBotRight = Math.round(PAGE_W * 0.70);  // right edge at bottom (756), leaning left to match italic
   const overlaySvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}">
-  <rect x="0" y="${OVERLAY_TOP}" width="${PAGE_W}" height="${OVERLAY_BOT - OVERLAY_TOP}" fill="black" opacity="0.55"/>
+  <polygon points="0,${OVERLAY_TOP} ${oTopRight},${OVERLAY_TOP} ${oBotRight},${OVERLAY_BOT} 0,${OVERLAY_BOT}" fill="black" opacity="0.55"/>
 </svg>`;
 
-  // SVG 2 — text paths; bold elements get an italic skew around their baseline
+  // SVG 2 — text; bold elements get an italic skew around their baseline
   const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}">
+  ${fontFaceStyle(["bold", "regular"])}
   <g transform="translate(0,${JR_Y}) skewX(-12) translate(0,-${JR_Y})">
     ${svgText("JUST REDUCED", TEXT_LEFT, JR_Y, 58, { weight: "bold", anchor: "start" })}
   </g>

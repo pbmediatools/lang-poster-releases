@@ -23,18 +23,20 @@ Structure exactly:
 2. Blank line.
 3. Body: 2–3 short paragraphs from the description and features. Highlight the standout features. Mention proximity to local landmarks if mentioned in source.
 4. Blank line.
-5. Property details block, each on its own line, with these exact emoji prefixes:
-   💷 {price}
-   📍 {short address}
-   🌐 {url}
+5. Property details block, each on its own line (no space between emoji and value except 📞):
+   💷{price}
+   ⚡{epcRating}  ← only include if epcRating is provided
+   📌{short address}
+   🔗{url}
    📞 {phone}
 
 X / TWITTER VERSION
-- Must be UNDER 280 characters total including the URL and any hashtags.
-- Lead with status + bed count, e.g. "TO LET | 2 Bed | £1,100 PCM".
-- One short benefit sentence.
-- End with the property URL.
-- No hashtags in this version.
+- ONE single line. No line breaks anywhere in xVersion.
+- MUST be under 280 characters total.
+- Format exactly: {STATUS} | {N} Bed | {price} — {one short benefit sentence ending with a full stop}. {displayListingUrl}
+- Use the displayListingUrl value exactly as supplied in the data — do not add http://, change capitalisation, or alter it in any way.
+- No hashtags. No emojis. No footer block. No extra lines.
+- Example: TO LET | 2 Bed | £950 pcm — Mid-terrace in Plymstock with a south-facing garden, recently decorated throughout. Langtownandcountry.com/property/example-street-plymstock/
 
 OUTPUT FORMAT
 Return ONLY a JSON object, no preamble. Schema:
@@ -45,6 +47,11 @@ Return ONLY a JSON object, no preamble. Schema:
 }`;
 
 export async function generateCaptions(property: Property): Promise<Captions> {
+  const linkSuffix = property.url
+    .replace(/^https?:\/\/(www\.)?langtownandcountry\.com\/property\//i, "")
+    .replace(/\/$/, "");
+  const displayListingUrl = `Langtownandcountry.com/property/${linkSuffix}/`;
+
   const userPayload = JSON.stringify(
     {
       address: property.address,
@@ -55,9 +62,10 @@ export async function generateCaptions(property: Property): Promise<Captions> {
       bathrooms: property.bathrooms,
       receptionRooms: property.receptionRooms,
       postcode: property.postcode,
+      epcRating: property.epcRating,
       features: property.features,
       description: property.description,
-      url: property.url,
+      displayListingUrl,
       phone: property.phone,
     },
     null,

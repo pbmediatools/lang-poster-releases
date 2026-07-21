@@ -44,7 +44,7 @@ export default function PostPage() {
   // ---- New Listing state ----
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<
-    "" | "scraping" | "rendering" | "captioning" | "scraping-multi" | "rendering-multi"
+    "" | "scraping" | "rendering" | "captioning" | "scraping-multi" | "rendering-multi" | "captioning-batch"
   >("");
   const [error, setError] = useState<string | null>(null);
   const [property, setProperty] = useState<Property | null>(null);
@@ -61,6 +61,9 @@ export default function PostPage() {
   const [singleItems, setSingleItems] = useState<SingleItem[]>([]);
   const [singleRendered, setSingleRendered] = useState<string[]>([]);
   const [singleScrapeProgress, setSingleScrapeProgress] = useState<{ done: number; total: number } | null>(null);
+  const [singleCaptions, setSingleCaptions] = useState<{ longForm: string; xCaption: string } | null>(null);
+  const [singleCaptionTab, setSingleCaptionTab] = useState<"social" | "x">("social");
+  const [singleCopied, setSingleCopied] = useState(false);
 
   // ---- Settings / updates ----
   const [showSettings, setShowSettings] = useState(false);
@@ -82,6 +85,7 @@ export default function PostPage() {
   function switchMode(m: AppMode) {
     setMode(m);
     setError(null);
+    setSingleCaptions(null);
   }
 
   async function saveApiKey() {
@@ -325,6 +329,51 @@ export default function PostPage() {
     URL.revokeObjectURL(objectUrl);
   }
 
+  // ---- Batch caption ----
+  async function handleBatchCaption() {
+    if (singleItems.length === 0) return;
+    setError(null);
+    setSingleCaptions(null);
+    setBusy("captioning-batch");
+    try {
+      const phone = singleItems[0]?.phone ?? "01752 200909";
+      const r = await fetch("/api/post/batch-caption", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          phone,
+          properties: singleItems.map((item) => ({
+            shortAddress: item.shortAddress,
+            bedrooms: item.property.bedrooms,
+            bathrooms: item.property.bathrooms,
+            features: item.property.features,
+            description: item.property.description,
+          })),
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "caption failed");
+      setSingleCaptions({ longForm: data.longForm, xCaption: data.xCaption });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function copySingleCaption() {
+    if (!singleCaptions) return;
+    const text = singleCaptionTab === "social" ? singleCaptions.longForm : singleCaptions.xCaption;
+    try {
+      await navigator.clipboard.writeText(text);
+      setSingleCopied(true);
+      setTimeout(() => setSingleCopied(false), 1500);
+    } catch {
+      setError("Could not copy to clipboard");
+    }
+  }
+
   // ---- Sale Agreed / Reduced logic ----
   async function handleScrapeSingle(e: React.FormEvent) {
     e.preventDefault();
@@ -336,6 +385,7 @@ export default function PostPage() {
     setError(null);
     setSingleItems([]);
     setSingleRendered([]);
+    setSingleCaptions(null);
     setSingleScrapeProgress({ done: 0, total: urls.length });
     setBusy("scraping-multi");
     try {
@@ -989,6 +1039,75 @@ export default function PostPage() {
               )}
             </div>
           </form>
+
+          {singleItems.length > 0 && (
+            <section className="mb-6 rounded border border-slate-200 bg-white p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-semibold">
+                  {mode === "sale-agreed" ? "Sale Agreed" : "Price Reduction"} captions
+                </h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleBatchCaption}
+                    disabled={anyBusy}
+                    className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {busy === "captioning-batch" ? "Generating…" : singleCaptions ? "Regenerate" : "Generate captions"}
+                  </button>
+                  {singleCaptions && (
+                    <button
+                      onClick={copySingleCaption}
+                      className="rounded border border-slate-300 px-4 py-2 text-sm font-medium text-slate-900"
+                    >
+                      {singleCopied ? "Copied!" : "Copy"}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mb-3 flex border-b border-slate-200">
+                <button
+                  onClick={() => setSingleCaptionTab("social")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    singleCaptionTab === "social"
+                      ? "border-slate-900 text-slate-900"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Facebook / Instagram
+                </button>
+                <button
+                  onClick={() => setSingleCaptionTab("x")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    singleCaptionTab === "x"
+                      ? "border-slate-900 text-slate-900"
+                      : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  X (Twitter)
+                </button>
+              </div>
+
+              {singleCaptions ? (
+                <textarea
+                  value={singleCaptionTab === "social" ? singleCaptions.longForm : singleCaptions.xCaption}
+                  onChange={(e) =>
+                    setSingleCaptions(
+                      singleCaptionTab === "social"
+                        ? { ...singleCaptions, longForm: e.target.value }
+                        : { ...singleCaptions, xCaption: e.target.value },
+                    )
+                  }
+                  className="h-64 w-full rounded border border-slate-300 p-3 font-mono text-sm leading-relaxed"
+                />
+              ) : (
+                <div className="rounded border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+                  Click <strong>Generate captions</strong> to draft a round-up post covering all{" "}
+                  {singleItems.length} {singleItems.length === 1 ? "property" : "properties"}.
+                </div>
+              )}
+            </section>
+          )}
 
           {singleItems.length > 0 && (
             <div className="grid gap-4">
