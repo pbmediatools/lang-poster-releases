@@ -296,30 +296,45 @@ const OVERLAY_TOP = 580;
 const OVERLAY_BOT = 890;
 const TEXT_LEFT = 60;
 
+const JR_Y    = OVERLAY_TOP + 90;   // JUST REDUCED baseline
+const ADDR_Y  = OVERLAY_TOP + 170;  // address baseline
+const PRICE_Y = OVERLAY_TOP + 255;  // price baseline
+
 export async function renderReduced(data: ReducedData): Promise<Buffer> {
   const imgBuf = await fetchBuffer(data.backgroundImageUrl);
   const bgBuf = await cropToFill(imgBuf, PAGE_W, PAGE_H, "centre");
 
+  // SVG 1 — dark overlay rectangle only
   const overlaySvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}">
   <rect x="0" y="${OVERLAY_TOP}" width="${PAGE_W}" height="${OVERLAY_BOT - OVERLAY_TOP}" fill="black" opacity="0.55"/>
-  ${svgText("JUST REDUCED", TEXT_LEFT, OVERLAY_TOP + 95, 72, { weight: "bold", anchor: "start" })}
-  ${svgText(data.shortAddress, TEXT_LEFT, OVERLAY_TOP + 175, 52, { weight: "light", anchor: "start" })}
-  ${svgText(data.price, TEXT_LEFT, OVERLAY_TOP + 265, 70, { weight: "bold", anchor: "start" })}
 </svg>`;
 
-  const [svgBuf, logoBuf, waveBuf] = await Promise.all([
+  // SVG 2 — text paths; bold elements get an italic skew around their baseline
+  const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}">
+  <g transform="translate(0,${JR_Y}) skewX(-12) translate(0,-${JR_Y})">
+    ${svgText("JUST REDUCED", TEXT_LEFT, JR_Y, 58, { weight: "bold", anchor: "start" })}
+  </g>
+  ${svgText(data.shortAddress, TEXT_LEFT, ADDR_Y, 50, { weight: "regular", anchor: "start" })}
+  <g transform="translate(0,${PRICE_Y}) skewX(-12) translate(0,-${PRICE_Y})">
+    ${svgText(data.price, TEXT_LEFT, PRICE_Y, 68, { weight: "bold", anchor: "start" })}
+  </g>
+</svg>`;
+
+  const [overlayBuf, textBuf, logoBuf, waveBuf] = await Promise.all([
     Promise.resolve(Buffer.from(overlaySvg)),
+    Promise.resolve(Buffer.from(textSvg)),
     scaledLogo(REDUCED_LOGO_W),
     Promise.resolve(loadAsset("wave.png")),
   ]);
 
-  // Wave goes first so text SVG renders on top of it.
-  // Negative top shifts the wave pattern ~100px higher in the frame.
+  // Layer order: bg → grey band → wave (sits ON TOP of grey band) → text → logo
   return sharp(bgBuf)
     .composite([
-      { input: waveBuf, top: -100, left: 0 },
-      { input: svgBuf, top: 0, left: 0 },
+      { input: overlayBuf, top: 0, left: 0 },
+      { input: waveBuf, top: -50, left: 0 },
+      { input: textBuf, top: 0, left: 0 },
       { input: logoBuf, top: REDUCED_LOGO_TOP, left: REDUCED_LOGO_LEFT },
     ])
     .png()
