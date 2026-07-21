@@ -11,28 +11,38 @@ export const OFFICES = {
 } as const;
 
 // Best-effort office routing. Detection order (most → least reliable):
-//  1. Postcode area
-//  2. Address / area keywords
-// Phone numbers are NOT used — the site footer lists all three on every page,
-// which causes false matches. User can always override in the UI.
+//  1. "Book a Viewing" link href — contains the office slug in its URL path
+//  2. Postcode area
+//  3. Address / area keywords
+// User can always override in the UI.
 function suggestOffice(opts: {
   postcode: string;
   address: string;
+  bookingHref?: string;
 }): { label: string; phone: string } {
-  const pc = opts.postcode.toUpperCase().replace(/\s+/g, "");
-  const addr = opts.address.toLowerCase();
+  // 1. The booking link URL contains the branch name, e.g.
+  //    /estate-agent-plymouth/sales-enquiries-plymstock
+  //    /estate-agent-plymouth/sales-enquiries-waterside
+  //    /estate-agent-plymouth/sales-enquiries-plymouth
+  if (opts.bookingHref) {
+    const href = opts.bookingHref.toLowerCase();
+    if (href.includes("plymstock")) return OFFICES.plymstock;
+    if (href.includes("waterside")) return OFFICES.waterside;
+    if (href.includes("plymouth")) return OFFICES.plymouth;
+  }
 
-  // 1. Postcode — PL9 is Plymstock / Elburton territory
+  // 2. Postcode — PL9 is Plymstock / Elburton territory
+  const pc = opts.postcode.toUpperCase().replace(/\s+/g, "");
   if (/^PL9/.test(pc)) return OFFICES.plymstock;
 
-  // 2. Plymstock-area address keywords
+  // 3. Address / area keywords
+  const addr = opts.address.toLowerCase();
   const plymstockKeywords = [
     "plymstock", "elburton", "hooe", "oreston", "turnchapel",
-    "staddiscombe", "wembury", "brixton", "yealmpton", "holbeton",
+    "staddiscombe", "wembury", "brixton", "yealmpton",
   ];
   if (plymstockKeywords.some((k) => addr.includes(k))) return OFFICES.plymstock;
 
-  // 3. Waterside-area address keywords
   const watersideKeywords = [
     "hoe", "barbican", "stonehouse", "cattedown",
     "millbay", "royal william yard", "sutton harbour", "coxside",
@@ -64,6 +74,13 @@ export async function scrapeProperty(url: string): Promise<Property> {
     addrParts.length > 1 ? `${addrParts[0]}, ${addrParts[1]}` : addrParts[0];
 
   const bodyText = $("body").text().replace(/\s+/g, " ");
+
+  // "Book a Viewing" link — the href encodes the branch, e.g.
+  //   /estate-agent-plymouth/sales-enquiries-plymstock
+  const bookingHref = $("a")
+    .filter((_, el) => /book\s+a\s+viewing/i.test($(el).text()))
+    .first()
+    .attr("href") ?? "";
 
   const priceMatch = bodyText.match(
     /£\s?[\d,]+(?:\s?(?:PCM|pcm|Per Calendar Month|per month))?/i,
@@ -172,6 +189,6 @@ export async function scrapeProperty(url: string): Promise<Property> {
     imageUrls: Array.from(imageUrls).slice(0, 100),
     phone: PHONE,
     epcRating,
-    suggestedOffice: suggestOffice({ postcode, address }),
+    suggestedOffice: suggestOffice({ postcode, address, bookingHref }),
   };
 }
