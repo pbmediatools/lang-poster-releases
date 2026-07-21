@@ -15,8 +15,8 @@ export async function POST(req: Request) {
     if (!property) {
       return NextResponse.json({ error: "property required" }, { status: 400 });
     }
-    const caption = await generatePostCaption({ property, office, phone });
-    return NextResponse.json({ caption });
+    const result = await generatePostCaption({ property, office, phone });
+    return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(
       { error: (e as Error).message },

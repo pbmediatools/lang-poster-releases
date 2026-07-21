@@ -36,7 +36,8 @@ export default function PostPage() {
   // First url = cover, urls 1..N = interior images, paired into pages
   const [picks, setPicks] = useState<string[]>([]);
   const [renderedPages, setRenderedPages] = useState<string[]>([]);
-  const [caption, setCaption] = useState("");
+  const [captions, setCaptions] = useState<{ longForm: string; xCaption: string } | null>(null);
+  const [captionTab, setCaptionTab] = useState<"social" | "x">("social");
   const [copied, setCopied] = useState(false);
   // Thumbnail size in pixels (min column width). Drag the slider to resize.
   const [thumbSize, setThumbSize] = useState(180);
@@ -128,7 +129,7 @@ export default function PostPage() {
     setProperty(null);
     setCover(null);
     setPicks([]);
-    setCaption("");
+    setCaptions(null);
     setBusy("scraping");
     try {
       const r = await fetch("/api/post/generate", {
@@ -258,7 +259,7 @@ export default function PostPage() {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "caption failed");
-      setCaption(data.caption);
+      setCaptions({ longForm: data.longForm, xCaption: data.xCaption });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -267,9 +268,10 @@ export default function PostPage() {
   }
 
   async function copyCaption() {
-    if (!caption) return;
+    if (!captions) return;
+    const text = captionTab === "social" ? captions.longForm : captions.xCaption;
     try {
-      await navigator.clipboard.writeText(caption);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -684,14 +686,8 @@ export default function PostPage() {
 
       {property && cover && (
         <section className="mt-8 rounded border border-slate-200 bg-white p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold">Caption</h2>
-              <p className="text-xs text-slate-500">
-                Long-form post for Facebook / Instagram / LinkedIn. Uses
-                Claude — costs roughly £0.01 per generation.
-              </p>
-            </div>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold">Captions</h2>
             <div className="flex gap-2">
               <button
                 onClick={handleCaption}
@@ -700,11 +696,11 @@ export default function PostPage() {
               >
                 {busy === "captioning"
                   ? "Generating…"
-                  : caption
+                  : captions
                     ? "Regenerate"
-                    : "Generate caption"}
+                    : "Generate captions"}
               </button>
-              {caption && (
+              {captions && (
                 <button
                   onClick={copyCaption}
                   className="rounded border border-slate-300 px-4 py-2 text-sm font-medium text-slate-900"
@@ -714,18 +710,60 @@ export default function PostPage() {
               )}
             </div>
           </div>
-          {caption ? (
-            <textarea
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              className="h-96 w-full rounded border border-slate-300 p-3 font-mono text-sm leading-relaxed"
-            />
+
+          {/* Tabs */}
+          <div className="mb-3 flex border-b border-slate-200">
+            <button
+              onClick={() => setCaptionTab("social")}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                captionTab === "social"
+                  ? "border-slate-900 text-slate-900"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Facebook / Instagram / LinkedIn
+            </button>
+            <button
+              onClick={() => setCaptionTab("x")}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                captionTab === "x"
+                  ? "border-slate-900 text-slate-900"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              X (Twitter)
+            </button>
+          </div>
+
+          {captions ? (
+            <>
+              {captionTab === "social" && (
+                <textarea
+                  value={captions.longForm}
+                  onChange={(e) => setCaptions({ ...captions, longForm: e.target.value })}
+                  className="h-96 w-full rounded border border-slate-300 p-3 font-mono text-sm leading-relaxed"
+                />
+              )}
+              {captionTab === "x" && (
+                <div>
+                  <textarea
+                    value={captions.xCaption}
+                    onChange={(e) => setCaptions({ ...captions, xCaption: e.target.value })}
+                    className="h-32 w-full rounded border border-slate-300 p-3 font-mono text-sm leading-relaxed"
+                    maxLength={280}
+                  />
+                  <div className={`mt-1 text-right text-xs ${captions.xCaption.length > 280 ? "text-red-600 font-semibold" : captions.xCaption.length > 260 ? "text-amber-600" : "text-slate-400"}`}>
+                    {captions.xCaption.length} / 280 characters
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div className="rounded border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              Click <strong>Generate caption</strong> to draft a post using
-              the property details. You can edit before copying.
+              Click <strong>Generate captions</strong> to draft posts for all platforms. You can edit before copying.
             </div>
           )}
+
           {!cover.epcRating && (
             <p className="mt-2 text-xs text-amber-700">
               Heads up: no EPC rating set — caption will omit that line. Add

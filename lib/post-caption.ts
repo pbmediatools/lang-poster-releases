@@ -3,42 +3,57 @@ import type { Property } from "./types";
 
 const client = new Anthropic();
 
-// User's exact style guide. Frozen + cacheable.
-const SYSTEM_PROMPT = `You are the social media copywriter for Lang Town & Country, an estate agent in Plymouth, UK. Write a social media caption for a property using the details provided.
+const SYSTEM_PROMPT = `You are the social media copywriter for Lang Town & Country, an estate and lettings agency based in Plymouth, UK. Write property posts that sound warm, knowledgeable, polished and reassuring — never pushy, generic or overly casual.
 
-STYLE AND TONE
-- Professional but conversational, never overly salesy
-- Confident, calm, and lifestyle-led
-- Natural and human (avoid generic or AI-sounding phrases)
-- Focus on key highlights only, not every detail
-- Written in UK English
+BRAND VOICE
+- Confident but never pushy. Professional but not cold. Friendly but not gimmicky.
+- Sound like a trusted local property expert with genuine knowledge of Plymouth, the South Hams, Plymstock, Plympton, Saltash and the surrounding areas.
+- British English only. Use: cosy, centre, realise, neighbourhood. Never: cozy, center, realize.
+- Aspirational but grounded. Highlight lifestyle, space, location and opportunity without being exaggerated or flowery.
+- No bullet points in captions.
+- No em dashes (—). Use commas, full stops or "and" instead.
+- No postcodes in captions.
+- Avoid excessive exclamation marks.
+- Use emojis only in the footer block, never in prose.
 
-STRUCTURE
-1. Open straight into 1 or 2 short paragraphs describing the property, focusing on standout features, lifestyle, and location. Do NOT write a headline or title sentence at the top of the caption.
-2. Keep sentences flowing. Do not use bullet points.
-3. Do not over-describe every room. Aim to create interest and encourage clicks.
-4. Avoid overused phrases like "tucked away".
-5. Do NOT use em dashes anywhere in the caption. Use commas, full stops, or "and" instead.
+WORDS AND PHRASES TO USE
+excellent presentation, beautifully maintained, well-proportioned, sought-after location, thoughtfully designed, generous living space, a superb opportunity, full of character, modern comfort, conveniently positioned, a well-regarded area, close to local amenities, ideal for families, professionals or downsizers, a rare opportunity in a desirable location, set within, positioned in, located in, situated within, featuring, offering, including
 
-End the caption with this footer block, each line on its own line, in this exact order:
-💷 {price}
-📊 EPC Rating: {epcRating}
-📍 {area}
-🌐 LangTownAndCountry.com/{linkSuffix}
-📞 {phone}
+WORDS AND PHRASES TO AVOID
+tucked away, hidden gem, must-see, won't be around for long, dream home, property ladder, act fast, boasting, nestled (unless it genuinely fits), perfect property (unless softened)
 
-If epcRating is null or unknown, omit the EPC line entirely (do not write "EPC Rating: null"). If area is null, use the postcode area instead.
+CALLS TO ACTION — use these, not aggressive alternatives
+"Contact us to arrange a viewing." / "Early viewing is well worth arranging." / "Speak to our team to find out more." / "Visit LangTownAndCountry.com to view the full details."
+Never use: "Don't miss out!", "Act now!", "Snap this up!", "Call before it's gone!"
 
-After the footer, add up to 5 relevant hashtags on a single line. Examples to draw from: #PlymouthProperty #PropertyForSale #LangTownAndCountry #DreamHome #PropertyOfTheWeek #FamilyHome #SeaViews. Pick whichever fit, max 5.
+LONG-FORM CAPTION (Facebook / Instagram / LinkedIn)
+Structure:
+1. A strong opening sentence leading with the home's strongest feature — location, presentation, character, outdoor space, views or investment potential.
+2. Blank line.
+3. 2–3 short paragraphs describing the home and its standout features. Help readers picture the lifestyle, not just the rooms. Mention proximity to local landmarks if relevant. Keep it elegant but not excessive.
+4. Blank line.
+5. A clear, calm viewing prompt (one sentence).
+6. Blank line.
+7. Footer — each item on its own line:
+   💷 {price}
+   📍 {area}
+   🌐 LangTownAndCountry.com
+   📞 {phone}
+8. One blank line, then 3–5 relevant hashtags on a single line. Choose from: #PlymouthProperty #LangTownAndCountry #PropertyForSale #ToLet #FamilyHome #SeaViews #WaterfrontLiving #PlymstockProperty #SouthHams #CornwallProperty #PropertyOfTheWeek
 
-ADDITIONAL NOTES
-- Highlight what makes the property appealing to a buyer (space, light, location, garden, views, character, etc.)
-- Keep it concise but engaging
-- Each caption should feel unique, even for similar properties
-- Do not repeat the price, address, or phone number in the body if they appear in the footer
+X / TWITTER VERSION
+- MUST be under 280 characters total including the URL.
+- Open with status and key details: "FOR SALE | 3 Bed | £285,000" or "TO LET | 2 Bed | £950 PCM".
+- One short sentence on the strongest feature.
+- End with the full property URL.
+- No hashtags. No emojis.
 
 OUTPUT
-Return only the final caption text, ready to paste into Facebook/Instagram/LinkedIn. No preamble, no JSON, no markdown fences.`;
+Return ONLY valid JSON with no preamble or markdown fences:
+{
+  "longForm": "the full long-form caption",
+  "xCaption": "the under-280-char X version"
+}`;
 
 export interface PostCaptionInput {
   property: Property;
@@ -46,16 +61,18 @@ export interface PostCaptionInput {
   phone: string;
 }
 
+export interface PostCaptionResult {
+  longForm: string;
+  xCaption: string;
+}
+
 function deriveLinkSuffix(url: string): string {
-  // e.g. https://www.langtownandcountry.com/property/st-michaels-lodge/ → "st-michaels-lodge"
   return url
     .replace(/^https?:\/\/(www\.)?langtownandcountry\.com\/property\//i, "")
     .replace(/\/$/, "");
 }
 
 function deriveArea(p: Property): string | null {
-  // Take the last comma-separated segment of the address, e.g.
-  // "St Michaels Lodge, Devonport Road, Stoke" → "Stoke"
   const parts = p.address.split(",").map((s) => s.trim()).filter(Boolean);
   if (parts.length >= 2) return parts[parts.length - 1];
   return null;
@@ -63,7 +80,7 @@ function deriveArea(p: Property): string | null {
 
 export async function generatePostCaption(
   input: PostCaptionInput,
-): Promise<string> {
+): Promise<PostCaptionResult> {
   const { property, phone } = input;
   const linkSuffix = deriveLinkSuffix(property.url);
   const area = deriveArea(property);
@@ -76,18 +93,17 @@ export async function generatePostCaption(
     bedrooms: property.bedrooms,
     bathrooms: property.bathrooms,
     receptionRooms: property.receptionRooms,
-    postcode: property.postcode,
     epcRating: property.epcRating,
     features: property.features,
     description: property.description,
     area,
-    linkSuffix,
+    propertyUrl: `https://www.langtownandcountry.com/property/${linkSuffix}/`,
     phone,
   };
 
   const response = await client.messages.create({
     model: "claude-opus-4-7",
-    max_tokens: 1200,
+    max_tokens: 1500,
     system: [
       {
         type: "text",
@@ -98,7 +114,7 @@ export async function generatePostCaption(
     messages: [
       {
         role: "user",
-        content: `Write the caption for this property:\n\n${JSON.stringify(userPayload, null, 2)}`,
+        content: `Write the social media captions for this property:\n\n${JSON.stringify(userPayload, null, 2)}`,
       },
     ],
   });
@@ -107,5 +123,22 @@ export async function generatePostCaption(
   if (!textBlock || textBlock.type !== "text") {
     throw new Error("No text in Claude response");
   }
-  return textBlock.text.trim();
+  const raw = textBlock.text.trim();
+  const json = raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/, "")
+    .replace(/\s*```$/, "");
+
+  let parsed: PostCaptionResult;
+  try {
+    parsed = JSON.parse(json);
+  } catch (e) {
+    throw new Error(`Caption JSON parse failed: ${(e as Error).message}\n${raw}`);
+  }
+
+  if (parsed.xCaption.length > 280) {
+    parsed.xCaption = parsed.xCaption.slice(0, 277) + "...";
+  }
+
+  return parsed;
 }
